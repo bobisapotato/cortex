@@ -1,5 +1,5 @@
 /*
-Copyright 2020 Cortex Labs, Inc.
+Copyright 2021 Cortex Labs, Inc.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -95,6 +95,10 @@ func NewMilliQuantity(milliValue int64) *Quantity {
 	}
 }
 
+func (quantity *Quantity) MilliString() string {
+	return s.Int64(quantity.Quantity.MilliValue()) + "m"
+}
+
 func (quantity *Quantity) ToFloat32() float32 {
 	return float32(quantity.Quantity.MilliValue()) / float32(1000)
 }
@@ -118,6 +122,15 @@ func SplitInTwo(quantity *kresource.Quantity) (*kresource.Quantity, *kresource.Q
 	return q1, q2
 }
 
+func SplitInThree(quantity *kresource.Quantity) (*kresource.Quantity, *kresource.Quantity, *kresource.Quantity) {
+	milliValue := quantity.MilliValue()
+	thirdMilliValue := milliValue / 3
+	q1 := kresource.NewMilliQuantity(milliValue-2*thirdMilliValue, kresource.DecimalSI)
+	q2 := kresource.NewMilliQuantity(thirdMilliValue, kresource.DecimalSI)
+	q3 := kresource.NewMilliQuantity(thirdMilliValue, kresource.DecimalSI)
+	return q1, q2, q3
+}
+
 func (quantity *Quantity) Sub(q2 kresource.Quantity) {
 	quantity.Quantity.Sub(q2)
 	quantity.UserString = ""
@@ -139,6 +152,9 @@ func (quantity *Quantity) AddQty(q2 Quantity) {
 }
 
 func (quantity *Quantity) String() string {
+	if quantity == nil {
+		return "<nil>"
+	}
 	if quantity.UserString != "" {
 		return quantity.UserString
 	}

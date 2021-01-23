@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Copyright 2020 Cortex Labs, Inc.
+# Copyright 2021 Cortex Labs, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -19,6 +19,6 @@ set -e
 CORTEX_VERSION=master
 
 if [ "$CORTEX_VERSION" != "$CORTEX_CLI_VERSION" ]; then
-  echo "error: your CLI version ($CORTEX_CLI_VERSION) doesn't match your Cortex manager image version ($CORTEX_VERSION); please update your CLI by following the instructions at https://docs.cortex.dev/install, or update your Cortex manager image by modifying the value for \`image_manager\` in your cluster configuration file (e.g. cluster.yaml) and running \`cortex cluster configure --config cluster.yaml\` (update other image paths in cluster.yaml as well if necessary)"
+  echo "error: your CLI version ($CORTEX_CLI_VERSION) doesn't match your Cortex manager image version ($CORTEX_VERSION); please update your CLI (pip install cortex==$CORTEX_VERSION), or update your Cortex manager image by modifying the value for \`image_manager\` in your cluster configuration file and running \`cortex cluster configure --config cluster.yaml\` (update other image paths in cluster.yaml as well if necessary)"
   exit 1
 fi

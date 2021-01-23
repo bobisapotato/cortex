@@ -1,5 +1,5 @@
 /*
-Copyright 2020 Cortex Labs, Inc.
+Copyright 2021 Cortex Labs, Inc.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -32,6 +32,13 @@ var _predictorTypes = []string{
 	"onnx",
 }
 
+var _casedPredictorTypes = []string{
+	"unknown",
+	"Python",
+	"TensorFlow",
+	"ONNX",
+}
+
 func PredictorTypeFromString(s string) PredictorType {
 	for i := 0; i < len(_predictorTypes); i++ {
 		if s == _predictorTypes[i] {
@@ -47,6 +54,10 @@ func PredictorTypeStrings() []string {
 
 func (t PredictorType) String() string {
 	return _predictorTypes[t]
+}
+
+func (t PredictorType) CasedString() string {
+	return _casedPredictorTypes[t]
 }
 
 // MarshalText satisfies TextMarshaler

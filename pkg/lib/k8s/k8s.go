@@ -1,5 +1,5 @@
 /*
-Copyright 2020 Cortex Labs, Inc.
+Copyright 2021 Cortex Labs, Inc.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -23,6 +23,8 @@ import (
 
 	"github.com/cortexlabs/cortex/pkg/lib/errors"
 	"github.com/cortexlabs/cortex/pkg/lib/random"
+	istioclient "istio.io/client-go/pkg/clientset/versioned"
+	istionetworkingclient "istio.io/client-go/pkg/clientset/versioned/typed/networking/v1beta1"
 	kresource "k8s.io/apimachinery/pkg/api/resource"
 	kmeta "k8s.io/apimachinery/pkg/apis/meta/v1"
 	kclientdynamic "k8s.io/client-go/dynamic"
@@ -41,32 +43,36 @@ import (
 var (
 	_home         = kclienthomedir.HomeDir()
 	_deletePolicy = kmeta.DeletePropagationBackground
-	_deleteOpts   = &kmeta.DeleteOptions{
+	_deleteOpts   = kmeta.DeleteOptions{
 		PropagationPolicy: &_deletePolicy,
 	}
 )
 
 type Client struct {
-	RestConfig       *kclientrest.Config
-	clientset        *kclientset.Clientset
-	dynamicClient    kclientdynamic.Interface
-	podClient        kclientcore.PodInterface
-	nodeClient       kclientcore.NodeInterface
-	serviceClient    kclientcore.ServiceInterface
-	configMapClient  kclientcore.ConfigMapInterface
-	deploymentClient kclientapps.DeploymentInterface
-	jobClient        kclientbatch.JobInterface
-	ingressClient    kclientextensions.IngressInterface
-	hpaClient        kclientautoscaling.HorizontalPodAutoscalerInterface
-	Namespace        string
+	RestConfig           *kclientrest.Config
+	clientset            *kclientset.Clientset
+	dynamicClient        kclientdynamic.Interface
+	podClient            kclientcore.PodInterface
+	nodeClient           kclientcore.NodeInterface
+	serviceClient        kclientcore.ServiceInterface
+	configMapClient      kclientcore.ConfigMapInterface
+	secretClient         kclientcore.SecretInterface
+	deploymentClient     kclientapps.DeploymentInterface
+	jobClient            kclientbatch.JobInterface
+	ingressClient        kclientextensions.IngressInterface
+	hpaClient            kclientautoscaling.HorizontalPodAutoscalerInterface
+	virtualServiceClient istionetworkingclient.VirtualServiceInterface
+	Namespace            string
 }
 
-func New(namespace string, inCluster bool) (*Client, error) {
+func New(namespace string, inCluster bool, restConfig *kclientrest.Config) (*Client, error) {
 	var err error
 	client := &Client{
 		Namespace: namespace,
 	}
-	if inCluster {
+	if restConfig != nil {
+		client.RestConfig = restConfig
+	} else if inCluster {
 		client.RestConfig, err = kclientrest.InClusterConfig()
 	} else {
 		kubeConfig := path.Join(_home, ".kube", "config")
@@ -87,10 +93,17 @@ func New(namespace string, inCluster bool) (*Client, error) {
 		return nil, errors.Wrap(err, "kubeconfig")
 	}
 
+	istioClient, err := istioclient.NewForConfig(client.RestConfig)
+	if err != nil {
+		return nil, errors.Wrap(err, "kubeconfig")
+	}
+	client.virtualServiceClient = istioClient.NetworkingV1beta1().VirtualServices(namespace)
+
 	client.podClient = client.clientset.CoreV1().Pods(namespace)
 	client.nodeClient = client.clientset.CoreV1().Nodes()
 	client.serviceClient = client.clientset.CoreV1().Services(namespace)
 	client.configMapClient = client.clientset.CoreV1().ConfigMaps(namespace)
+	client.secretClient = client.clientset.CoreV1().Secrets(namespace)
 	client.deploymentClient = client.clientset.AppsV1().Deployments(namespace)
 	client.jobClient = client.clientset.BatchV1().Jobs(namespace)
 	client.ingressClient = client.clientset.ExtensionsV1beta1().Ingresses(namespace)

@@ -1,5 +1,5 @@
 /*
-Copyright 2020 Cortex Labs, Inc.
+Copyright 2021 Cortex Labs, Inc.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,6 +17,8 @@ limitations under the License.
 package k8s
 
 import (
+	"context"
+
 	"github.com/cortexlabs/cortex/pkg/lib/errors"
 	kbatch "k8s.io/api/batch/v1"
 	kcore "k8s.io/api/core/v1"
@@ -31,20 +33,18 @@ var _jobTypeMeta = kmeta.TypeMeta{
 }
 
 type JobSpec struct {
-	Name        string
-	PodSpec     PodSpec
-	Labels      map[string]string
-	Annotations map[string]string
+	Name         string
+	PodSpec      PodSpec
+	Parallelism  int32
+	BackoffLimit int32
+	Labels       map[string]string
+	Annotations  map[string]string
 }
 
 func Job(spec *JobSpec) *kbatch.Job {
 	if spec.PodSpec.Name == "" {
 		spec.PodSpec.Name = spec.Name
 	}
-
-	parallelism := int32(1)
-	backoffLimit := int32(0)
-	completions := int32(1)
 
 	job := &kbatch.Job{
 		TypeMeta: _jobTypeMeta,
@@ -54,9 +54,8 @@ func Job(spec *JobSpec) *kbatch.Job {
 			Annotations: spec.Annotations,
 		},
 		Spec: kbatch.JobSpec{
-			BackoffLimit: &backoffLimit,
-			Parallelism:  &parallelism,
-			Completions:  &completions,
+			BackoffLimit: &spec.BackoffLimit,
+			Parallelism:  &spec.Parallelism,
 			Template: kcore.PodTemplateSpec{
 				ObjectMeta: kmeta.ObjectMeta{
 					Name:   spec.PodSpec.Name,
@@ -71,7 +70,7 @@ func Job(spec *JobSpec) *kbatch.Job {
 
 func (c *Client) CreateJob(job *kbatch.Job) (*kbatch.Job, error) {
 	job.TypeMeta = _jobTypeMeta
-	job, err := c.jobClient.Create(job)
+	job, err := c.jobClient.Create(context.Background(), job, kmeta.CreateOptions{})
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}
@@ -80,7 +79,7 @@ func (c *Client) CreateJob(job *kbatch.Job) (*kbatch.Job, error) {
 
 func (c *Client) UpdateJob(job *kbatch.Job) (*kbatch.Job, error) {
 	job.TypeMeta = _jobTypeMeta
-	job, err := c.jobClient.Update(job)
+	job, err := c.jobClient.Update(context.Background(), job, kmeta.UpdateOptions{})
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}
@@ -99,11 +98,11 @@ func (c *Client) ApplyJob(job *kbatch.Job) (*kbatch.Job, error) {
 }
 
 func (c *Client) GetJob(name string) (*kbatch.Job, error) {
-	job, err := c.jobClient.Get(name, kmeta.GetOptions{})
-	if kerrors.IsNotFound(err) {
-		return nil, nil
-	}
+	job, err := c.jobClient.Get(context.Background(), name, kmeta.GetOptions{})
 	if err != nil {
+		if kerrors.IsNotFound(err) {
+			return nil, nil
+		}
 		return nil, errors.WithStack(err)
 	}
 	job.TypeMeta = _jobTypeMeta
@@ -111,13 +110,26 @@ func (c *Client) GetJob(name string) (*kbatch.Job, error) {
 }
 
 func (c *Client) DeleteJob(name string) (bool, error) {
-	err := c.jobClient.Delete(name, _deleteOpts)
-	if kerrors.IsNotFound(err) {
-		return false, nil
+	err := c.jobClient.Delete(context.Background(), name, _deleteOpts)
+	if err != nil {
+		if kerrors.IsNotFound(err) {
+			return false, nil
+		}
+		return false, errors.WithStack(err)
 	}
+	return true, nil
+}
+
+func (c *Client) DeleteJobs(opts *kmeta.ListOptions) (bool, error) {
+	if opts == nil {
+		opts = &kmeta.ListOptions{}
+	}
+
+	err := c.jobClient.DeleteCollection(context.Background(), _deleteOpts, *opts)
 	if err != nil {
 		return false, errors.WithStack(err)
 	}
+
 	return true, nil
 }
 
@@ -125,7 +137,7 @@ func (c *Client) ListJobs(opts *kmeta.ListOptions) ([]kbatch.Job, error) {
 	if opts == nil {
 		opts = &kmeta.ListOptions{}
 	}
-	jobList, err := c.jobClient.List(*opts)
+	jobList, err := c.jobClient.List(context.Background(), *opts)
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}

@@ -1,5 +1,5 @@
 /*
-Copyright 2020 Cortex Labs, Inc.
+Copyright 2021 Cortex Labs, Inc.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -692,6 +692,40 @@ func InterfaceToStrInterfaceMap(in interface{}) (map[string]interface{}, bool) {
 		out[casted] = value
 	}
 	return out, true
+}
+
+// Recursively casts interface->interface maps to string->interface maps
+func JSONMarshallable(in interface{}) (interface{}, bool) {
+	if in == nil {
+		return nil, true
+	}
+
+	if inMap, ok := InterfaceToInterfaceInterfaceMap(in); ok {
+		out := map[string]interface{}{}
+		for key, value := range inMap {
+			castedKey, ok := key.(string)
+			if !ok {
+				return nil, false
+			}
+			castedValue, ok := JSONMarshallable(value)
+			if !ok {
+				return nil, false
+			}
+			out[castedKey] = castedValue
+		}
+		return out, true
+	} else if inSlice, ok := InterfaceToInterfaceSlice(in); ok {
+		out := make([]interface{}, 0, len(inSlice))
+		for _, inValue := range inSlice {
+			castedInValue, ok := JSONMarshallable(inValue)
+			if !ok {
+				return nil, false
+			}
+			out = append(out, castedInValue)
+		}
+		return out, true
+	}
+	return in, true
 }
 
 func InterfaceToStrStrMap(in interface{}) (map[string]string, bool) {

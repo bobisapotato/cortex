@@ -1,61 +1,71 @@
-# Table of contents
+# Summary
 
-* [Machine learning model serving infrastructure](../README.md)
-* [Install](cluster-management/install.md)
-* [Tutorial](../examples/sklearn/iris-classifier/README.md)
-* [GitHub](https://github.com/cortexlabs/cortex)
-* [Examples](https://github.com/cortexlabs/cortex/tree/master/examples)  <!-- CORTEX_VERSION_MINOR -->
-* [Chat with us](https://gitter.im/cortexlabs/cortex)
-* [Email us](mailto:hello@cortex.dev)
-* [We're hiring](https://angel.co/cortex-labs-inc/jobs)
+* [Get started](workloads/realtime/example.md)
 
-## Deployments
+## Workloads
 
-* [Exporting models](deployments/exporting.md)
-* [Predictor implementation](deployments/predictors.md)
-* [API configuration](deployments/api-configuration.md)
-* [API deployment](deployments/deployment.md)
-* [Autoscaling](deployments/autoscaling.md)
-* [Compute](deployments/compute.md)
-* [Using GPUs](deployments/gpus.md)
-* [Prediction monitoring](deployments/prediction-monitoring.md)
-* [Python packages](deployments/python-packages.md)
-* [System packages](deployments/system-packages.md)
-* [API statuses](deployments/statuses.md)
+* Realtime
+  * [Example](workloads/realtime/example.md)
+  * [Predictor](workloads/realtime/predictors.md)
+  * [Configuration](workloads/realtime/configuration.md)
+  * [Models](workloads/realtime/models.md)
+  * [Parallelism](workloads/realtime/parallelism.md)
+  * [Server-side batching](workloads/realtime/server-side-batching.md)
+  * [Autoscaling](workloads/realtime/autoscaling.md)
+  * [Metrics](workloads/realtime/metrics.md)
+  * [Statuses](workloads/realtime/statuses.md)
+  * [Troubleshooting](workloads/realtime/troubleshooting.md)
+* Batch
+  * [Example](workloads/batch/example.md)
+  * [Predictor](workloads/batch/predictors.md)
+  * [Configuration](workloads/batch/configuration.md)
+  * [Jobs](workloads/batch/jobs.md)
+  * [Statuses](workloads/batch/statuses.md)
+* Task
+  * [Example](workloads/task/example.md)
+  * [Definition](workloads/task/definitions.md)
+  * [Configuration](workloads/task/configuration.md)
+  * [Jobs](workloads/task/jobs.md)
+  * [Statuses](workloads/task/statuses.md)
+* Multi-model
+  * [Example](workloads/multi-model/example.md)
+  * [Configuration](workloads/multi-model/configuration.md)
+  * [Caching](workloads/multi-model/caching.md)
+* Traffic Splitter
+  * [Example](workloads/traffic-splitter/example.md)
+  * [Configuration](workloads/traffic-splitter/configuration.md)
+* Managing dependencies
+  * [Example](workloads/dependencies/example.md)
+  * [Python packages](workloads/dependencies/python-packages.md)
+  * [System packages](workloads/dependencies/system-packages.md)
+  * [Custom images](workloads/dependencies/images.md)
 
-## Cluster management
+## Clusters
 
-* [Cluster configuration](cluster-management/config.md)
-* [AWS credentials](cluster-management/aws-credentials.md)
-* [EC2 instances](cluster-management/ec2-instances.md)
-* [Spot instances](cluster-management/spot-instances.md)
-* [Update](cluster-management/update.md)
-* [Uninstall](cluster-management/uninstall.md)
+* AWS
+  * [Install](clusters/aws/install.md)
+  * [Update](clusters/aws/update.md)
+  * [Security](clusters/aws/security.md)
+  * [Logging](clusters/aws/logging.md)
+  * [Spot instances](clusters/aws/spot.md)
+  * [Networking](clusters/aws/networking/index.md)
+    * [Custom domain](clusters/aws/networking/custom-domain.md)
+    * [HTTPS (via API Gateway)](clusters/aws/networking/https.md)
+    * [VPC peering](clusters/aws/networking/vpc-peering.md)
+  * [Setting up kubectl](clusters/aws/kubectl.md)
+  * [Uninstall](clusters/aws/uninstall.md)
+* GCP
+  * [Install](clusters/gcp/install.md)
+  * [Logging](clusters/aws/logging.md)
+  * [Credentials](clusters/gcp/credentials.md)
+  * [Setting up kubectl](clusters/gcp/kubectl.md)
+  * [Uninstall](clusters/gcp/uninstall.md)
 
-## Miscellaneous
+## Clients
 
-* [CLI commands](miscellaneous/cli.md)
-* [Environments](miscellaneous/environments.md)
-* [Architecture diagram](miscellaneous/architecture.md)
-* [Security](miscellaneous/security.md)
-* [Telemetry](miscellaneous/telemetry.md)
-
-## Troubleshooting
-
-* [API is stuck updating](troubleshooting/stuck-updating.md)
-* [NVIDIA runtime not found](troubleshooting/nvidia-container-runtime-not-found.md)
-
-## Guides
-
-* [Multi-model endpoints](guides/multi-model.md)
-* [View API metrics](guides/metrics.md)
-* [Set up AWS API gateway](guides/api-gateway.md)
-* [Set up HTTPS on a subdomain](guides/subdomain-https-setup.md)
-* [Set up VPC peering](guides/vpc-peering.md)
-* [Add a batch runner API](guides/batch-runner.md)
-* [SSH into worker instance](guides/ssh-instance.md)
-* [Single node deployment](guides/single-node-deployment.md)
-
-## Contributing
-
-* [Development](contributing/development.md)
+* [Install](clients/install.md)
+* [CLI commands](clients/cli.md)
+* [Python API](clients/python.md)
+* [Environments](clients/environments.md)
+* [Telemetry](clients/telemetry.md)
+* [Uninstall](clients/uninstall.md)

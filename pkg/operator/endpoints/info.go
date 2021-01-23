@@ -1,5 +1,5 @@
 /*
-Copyright 2020 Cortex Labs, Inc.
+Copyright 2021 Cortex Labs, Inc.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -27,24 +27,32 @@ import (
 	s "github.com/cortexlabs/cortex/pkg/lib/strings"
 	"github.com/cortexlabs/cortex/pkg/operator/config"
 	"github.com/cortexlabs/cortex/pkg/operator/schema"
+	"github.com/cortexlabs/cortex/pkg/types"
 	"github.com/cortexlabs/cortex/pkg/types/userconfig"
 	kcore "k8s.io/api/core/v1"
 )
 
 func Info(w http.ResponseWriter, r *http.Request) {
-	nodeInfos, numPendingReplicas, err := getNodeInfos()
-	if err != nil {
-		respondError(w, r, err)
-		return
-	}
+	if config.Provider == types.AWSProviderType {
+		nodeInfos, numPendingReplicas, err := getNodeInfos()
+		if err != nil {
+			respondError(w, r, err)
+			return
+		}
 
-	response := schema.InfoResponse{
-		MaskedAWSAccessKeyID: s.MaskString(os.Getenv("AWS_ACCESS_KEY_ID"), 4),
-		ClusterConfig:        *config.Cluster,
-		NodeInfos:            nodeInfos,
-		NumPendingReplicas:   numPendingReplicas,
+		response := schema.InfoResponse{
+			MaskedAWSAccessKeyID: s.MaskString(os.Getenv("AWS_ACCESS_KEY_ID"), 4),
+			ClusterConfig:        *config.Cluster,
+			NodeInfos:            nodeInfos,
+			NumPendingReplicas:   numPendingReplicas,
+		}
+		respond(w, response)
+	} else {
+		response := schema.InfoGCPResponse{
+			ClusterConfig: *config.GCPCluster,
+		}
+		respond(w, response)
 	}
-	respond(w, response)
 }
 
 func getNodeInfos() ([]schema.NodeInfo, int, error) {
@@ -70,7 +78,7 @@ func getNodeInfos() ([]schema.NodeInfo, int, error) {
 			if spotPrice, ok := spotPriceCache[instanceType]; ok {
 				price = spotPrice
 			} else {
-				spotPrice, err := config.AWS.SpotInstancePrice(*config.Cluster.Region, instanceType)
+				spotPrice, err := config.AWS.SpotInstancePrice(instanceType)
 				if err == nil && spotPrice != 0 {
 					price = spotPrice
 					spotPriceCache[instanceType] = spotPrice
@@ -81,13 +89,14 @@ func getNodeInfos() ([]schema.NodeInfo, int, error) {
 		}
 
 		nodeInfoMap[node.Name] = &schema.NodeInfo{
-			Name:             node.Name,
-			InstanceType:     instanceType,
-			IsSpot:           isSpot,
-			Price:            price,
-			NumReplicas:      0,                             // will be added to below
-			ComputeCapacity:  nodeComputeAllocatable(&node), // will be subtracted from below
-			ComputeAvailable: nodeComputeAllocatable(&node), // will be subtracted from below
+			Name:                 node.Name,
+			InstanceType:         instanceType,
+			IsSpot:               isSpot,
+			Price:                price,
+			NumReplicas:          0,                             // will be added to below
+			ComputeUserCapacity:  nodeComputeAllocatable(&node), // will be subtracted from below
+			ComputeAvailable:     nodeComputeAllocatable(&node), // will be subtracted from below
+			ComputeUserRequested: userconfig.ZeroCompute(),      // will be added to below
 		}
 	}
 
@@ -110,16 +119,23 @@ func getNodeInfos() ([]schema.NodeInfo, int, error) {
 			node.NumReplicas++
 		}
 
-		cpu, mem, gpu := k8s.TotalPodCompute(&pod.Spec)
+		cpu, mem, gpu, inf := k8s.TotalPodCompute(&pod.Spec)
 
 		node.ComputeAvailable.CPU.SubQty(cpu)
 		node.ComputeAvailable.Mem.SubQty(mem)
 		node.ComputeAvailable.GPU -= gpu
+		node.ComputeAvailable.Inf -= inf
 
-		if !isAPIPod {
-			node.ComputeCapacity.CPU.SubQty(cpu)
-			node.ComputeCapacity.Mem.SubQty(mem)
-			node.ComputeCapacity.GPU -= gpu
+		if isAPIPod {
+			node.ComputeUserRequested.CPU.AddQty(cpu)
+			node.ComputeUserRequested.Mem.AddQty(mem)
+			node.ComputeUserRequested.GPU += gpu
+			node.ComputeUserRequested.Inf += inf
+		} else {
+			node.ComputeUserCapacity.CPU.SubQty(cpu)
+			node.ComputeUserCapacity.Mem.SubQty(mem)
+			node.ComputeUserCapacity.GPU -= gpu
+			node.ComputeUserCapacity.Inf -= inf
 		}
 	}
 
@@ -140,10 +156,12 @@ func getNodeInfos() ([]schema.NodeInfo, int, error) {
 
 func nodeComputeAllocatable(node *kcore.Node) userconfig.Compute {
 	gpuQty := node.Status.Allocatable["nvidia.com/gpu"]
+	infQty := node.Status.Allocatable["aws.amazon.com/neuron"]
 
 	return userconfig.Compute{
 		CPU: k8s.WrapQuantity(*node.Status.Allocatable.Cpu()),
 		Mem: k8s.WrapQuantity(*node.Status.Allocatable.Memory()),
-		GPU: (&gpuQty).Value(),
+		GPU: gpuQty.Value(),
+		Inf: infQty.Value(),
 	}
 }

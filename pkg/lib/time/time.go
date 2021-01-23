@@ -1,5 +1,5 @@
 /*
-Copyright 2020 Cortex Labs, Inc.
+Copyright 2021 Cortex Labs, Inc.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -73,11 +73,11 @@ func DifferenceStr(t1 *time.Time, t2 *time.Time) string {
 	if durationSecs < 60 {
 		return strconv.Itoa(durationSecs) + "s"
 	} else if durationSecs < 3600 {
-		return strconv.Itoa(durationSecs/60) + "m"
+		return strconv.Itoa(durationSecs/60) + "m" + strconv.Itoa(durationSecs-durationSecs/60*60) + "s"
 	} else if durationSecs < 48*3600 {
-		return strconv.Itoa(durationSecs/3600) + "h"
+		return strconv.Itoa(durationSecs/3600) + "h" + strconv.Itoa((durationSecs-durationSecs/3600*3600)/60) + "m"
 	} else {
-		return strconv.Itoa(durationSecs/(24*3600)) + "d"
+		return strconv.Itoa(durationSecs/(24*3600)) + "d" + strconv.Itoa((durationSecs-durationSecs/(24*3600)*(24*3600))/3600) + "h"
 	}
 }
 

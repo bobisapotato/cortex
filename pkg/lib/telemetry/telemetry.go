@@ -1,5 +1,5 @@
 /*
-Copyright 2020 Cortex Labs, Inc.
+Copyright 2021 Cortex Labs, Inc.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -27,6 +27,7 @@ import (
 	"github.com/cortexlabs/cortex/pkg/lib/errors"
 	"github.com/cortexlabs/cortex/pkg/lib/maps"
 	"github.com/cortexlabs/cortex/pkg/lib/parallel"
+	s "github.com/cortexlabs/cortex/pkg/lib/strings"
 	"github.com/getsentry/sentry-go"
 	"gopkg.in/segmentio/analytics-go.v3"
 )
@@ -201,8 +202,13 @@ func EventFromException(exception error) *sentry.Event {
 	event := sentry.NewEvent()
 	event.Level = sentry.LevelError
 
+	value := errors.Message(exception)
+	if metadata := errors.GetMetadata(exception); metadata != nil {
+		value = value + "\n\n########## metadata ##########\n" + s.ObjStripped(metadata)
+	}
+
 	event.Exception = []sentry.Exception{{
-		Value:      errors.Message(exception),
+		Value:      value,
 		Type:       errTypeString,
 		Stacktrace: stacktrace,
 	}}

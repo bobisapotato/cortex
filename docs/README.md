@@ -1,1 +1,1 @@
-Please refer to [cortex.dev](https://cortex.dev) for documentation on the latest stable version.
+**Please view our documentation at [docs.cortex.dev](https://docs.cortex.dev/)**

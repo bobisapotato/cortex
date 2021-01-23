@@ -1,5 +1,5 @@
 /*
-Copyright 2020 Cortex Labs, Inc.
+Copyright 2021 Cortex Labs, Inc.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -19,44 +19,64 @@ package userconfig
 const (
 	// API
 	NameKey           = "name"
-	EndpointKey       = "endpoint"
-	LocalPortKey      = "local_port"
+	KindKey           = "kind"
 	PredictorKey      = "predictor"
-	MonitoringKey     = "monitoring"
+	TaskDefinitionKey = "definition"
+	NetworkingKey     = "networking"
 	ComputeKey        = "compute"
 	AutoscalingKey    = "autoscaling"
 	UpdateStrategyKey = "update_strategy"
 
+	// TrafficSplitter
+	APIsKey   = "apis"
+	WeightKey = "weight"
+
 	// Predictor
 	TypeKey                   = "type"
 	PathKey                   = "path"
-	ModelKey                  = "model"
-	ModelsKey                 = "models"
+	ServerSideBatchingKey     = "server_side_batching"
 	PythonPathKey             = "python_path"
 	ImageKey                  = "image"
 	TensorFlowServingImageKey = "tensorflow_serving_image"
+	ProcessesPerReplicaKey    = "processes_per_replica"
+	ThreadsPerProcessKey      = "threads_per_process"
+	ShmSize                   = "shm_size"
+	LogLevelKey               = "log_level"
 	ConfigKey                 = "config"
 	EnvKey                    = "env"
-	SignatureKeyKey           = "signature_key"
+
+	// MultiModelReloading
+	MultiModelReloadingKey = "multi_model_reloading"
+
+	// MultiModels
+	ModelsKey              = "models"
+	ModelsPathKey          = "path"
+	ModelsPathsKey         = "paths"
+	ModelsDirKey           = "dir"
+	ModelsSignatureKeyKey  = "signature_key"
+	ModelsCacheSizeKey     = "cache_size"
+	ModelsDiskCacheSizeKey = "disk_cache_size"
+
+	// ServerSideBatching
+	MaxBatchSizeKey  = "max_batch_size"
+	BatchIntervalKey = "batch_interval"
 
 	// ModelResource
 	ModelsNameKey = "name"
 
-	// Monitoring
-	KeyKey       = "key"
-	ModelTypeKey = "model_type"
+	// Networking
+	EndpointKey = "endpoint"
 
 	// Compute
 	CPUKey = "cpu"
 	MemKey = "mem"
 	GPUKey = "gpu"
+	InfKey = "inf"
 
 	// Autoscaling
 	MinReplicasKey                  = "min_replicas"
 	MaxReplicasKey                  = "max_replicas"
 	InitReplicasKey                 = "init_replicas"
-	WorkersPerReplicaKey            = "workers_per_replica"
-	ThreadsPerWorkerKey             = "threads_per_worker"
 	TargetReplicaConcurrencyKey     = "target_replica_concurrency"
 	MaxReplicaConcurrencyKey        = "max_replica_concurrency"
 	WindowKey                       = "window"
@@ -72,10 +92,11 @@ const (
 	MaxUnavailableKey = "max_unavailable"
 
 	// K8s annotation
+	EndpointAnnotationKey                     = "networking.cortex.dev/endpoint"
+	ProcessesPerReplicaAnnotationKey          = "predictor.cortex.dev/processes-per-replica"
+	ThreadsPerProcessAnnotationKey            = "predictor.cortex.dev/threads-per-process"
 	MinReplicasAnnotationKey                  = "autoscaling.cortex.dev/min-replicas"
 	MaxReplicasAnnotationKey                  = "autoscaling.cortex.dev/max-replicas"
-	WorkersPerReplicaAnnotationKey            = "autoscaling.cortex.dev/workers-per-replica"
-	ThreadsPerWorkerAnnotationKey             = "autoscaling.cortex.dev/threads-per-worker"
 	TargetReplicaConcurrencyAnnotationKey     = "autoscaling.cortex.dev/target-replica-concurrency"
 	MaxReplicaConcurrencyAnnotationKey        = "autoscaling.cortex.dev/max-replica-concurrency"
 	WindowAnnotationKey                       = "autoscaling.cortex.dev/window"

@@ -1,5 +1,5 @@
 /*
-Copyright 2020 Cortex Labs, Inc.
+Copyright 2021 Cortex Labs, Inc.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -16,6 +16,10 @@ limitations under the License.
 
 package slices
 
+import (
+	s "github.com/cortexlabs/cortex/pkg/lib/strings"
+)
+
 func HasInt64(list []int64, query int64) bool {
 	for _, elem := range list {
 		if elem == query {
@@ -27,4 +31,24 @@ func HasInt64(list []int64, query int64) bool {
 
 func CopyInt64s(vals []int64) []int64 {
 	return append(vals[:0:0], vals...)
+}
+
+func UniqueInt64(vals []int64) []int64 {
+	keys := make(map[int64]bool)
+	list := []int64{}
+	for _, entry := range vals {
+		if _, value := keys[entry]; !value {
+			keys[entry] = true
+			list = append(list, entry)
+		}
+	}
+	return list
+}
+
+func Int64ToString(vals []int64) []string {
+	stringSlice := []string{}
+	for _, elem := range vals {
+		stringSlice = append(stringSlice, s.Int64(elem))
+	}
+	return stringSlice
 }

@@ -1,5 +1,5 @@
 /*
-Copyright 2020 Cortex Labs, Inc.
+Copyright 2021 Cortex Labs, Inc.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,6 +17,8 @@ limitations under the License.
 package slices
 
 import (
+	"strconv"
+
 	libmath "github.com/cortexlabs/cortex/pkg/lib/math"
 	"github.com/cortexlabs/cortex/pkg/lib/sets/strset"
 )
@@ -197,4 +199,40 @@ func ZipStrsToMap(strs1 []string, strs2 []string) map[string]string {
 		strMap[strs1[i]] = strs2[i]
 	}
 	return strMap
+}
+
+func StringToInt(vals []string) ([]int, error) {
+	intSlice := []int{}
+	for _, elem := range vals {
+		i, err := strconv.Atoi(elem)
+		if err != nil {
+			return nil, err
+		}
+		intSlice = append(intSlice, i)
+	}
+	return intSlice, nil
+}
+
+func StringToInt32(vals []string) ([]int32, error) {
+	intSlice := []int32{}
+	for _, elem := range vals {
+		i, err := strconv.ParseInt(elem, 10, 32)
+		if err != nil {
+			return nil, err
+		}
+		intSlice = append(intSlice, int32(i))
+	}
+	return intSlice, nil
+}
+
+func StringToInt64(vals []string) ([]int64, error) {
+	intSlice := []int64{}
+	for _, elem := range vals {
+		i, err := strconv.ParseInt(elem, 10, 64)
+		if err != nil {
+			return nil, err
+		}
+		intSlice = append(intSlice, i)
+	}
+	return intSlice, nil
 }

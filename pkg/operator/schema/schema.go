@@ -1,5 +1,5 @@
 /*
-Copyright 2020 Cortex Labs, Inc.
+Copyright 2021 Cortex Labs, Inc.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -31,40 +31,48 @@ type InfoResponse struct {
 	NumPendingReplicas   int                          `json:"num_pending_replicas"`
 }
 
-type NodeInfo struct {
-	Name             string             `json:"name"`
-	InstanceType     string             `json:"instance_type"`
-	IsSpot           bool               `json:"is_spot"`
-	Price            float64            `json:"price"`
-	NumReplicas      int                `json:"num_replicas"`
-	ComputeCapacity  userconfig.Compute `json:"compute_capacity"`  // the total resources available to the user on a node
-	ComputeAvailable userconfig.Compute `json:"compute_available"` // unused resources on a node
+type InfoGCPResponse struct {
+	ClusterConfig clusterconfig.InternalGCPConfig `json:"cluster_config"`
 }
 
-type DeployResponse struct {
-	Results []DeployResult `json:"results"`
-	BaseURL string         `json:"base_url"`
+type NodeInfo struct {
+	Name                 string             `json:"name"`
+	InstanceType         string             `json:"instance_type"`
+	IsSpot               bool               `json:"is_spot"`
+	Price                float64            `json:"price"`
+	NumReplicas          int                `json:"num_replicas"`
+	ComputeUserCapacity  userconfig.Compute `json:"compute_user_capacity"`  // the total resources available to the user on a node
+	ComputeAvailable     userconfig.Compute `json:"compute_available"`      // unused resources on a node
+	ComputeUserRequested userconfig.Compute `json:"compute_user_requested"` // total resources requested by user on a node
 }
 
 type DeployResult struct {
-	API     spec.API
-	Message string
-	Error   string
+	API     *APIResponse `json:"api"`
+	Message string       `json:"message"`
+	Error   string       `json:"error"`
 }
 
-type GetAPIsResponse struct {
-	APIs       []spec.API        `json:"apis"`
-	Statuses   []status.Status   `json:"statuses"`
-	AllMetrics []metrics.Metrics `json:"all_metrics"`
-	BaseURL    string            `json:"base_url"`
+type APIResponse struct {
+	Spec             spec.API                `json:"spec"`
+	Status           *status.Status          `json:"status,omitempty"`
+	Metrics          *metrics.Metrics        `json:"metrics,omitempty"`
+	Endpoint         string                  `json:"endpoint"`
+	DashboardURL     *string                 `json:"dashboard_url,omitempty"`
+	BatchJobStatuses []status.BatchJobStatus `json:"batch_job_statuses,omitempty"`
+	TaskJobStatuses  []status.TaskJobStatus  `json:"task_job_statuses,omitempty"`
+	APIVersions      []APIVersion            `json:"api_versions,omitempty"`
 }
 
-type GetAPIResponse struct {
-	API          spec.API        `json:"api"`
-	Status       status.Status   `json:"status"`
-	Metrics      metrics.Metrics `json:"metrics"`
-	BaseURL      string          `json:"base_url"`
-	DashboardURL string          `json:"dashboard_url"`
+type BatchJobResponse struct {
+	APISpec   spec.API              `json:"api_spec"`
+	JobStatus status.BatchJobStatus `json:"job_status"`
+	Endpoint  string                `json:"endpoint"`
+}
+
+type TaskJobResponse struct {
+	APISpec   spec.API             `json:"api_spec"`
+	JobStatus status.TaskJobStatus `json:"job_status"`
+	Endpoint  string               `json:"endpoint"`
 }
 
 type DeleteResponse struct {
@@ -80,14 +88,39 @@ type ErrorResponse struct {
 	Message string `json:"message"`
 }
 
+type GCPLogsResponse struct {
+	QueryParams map[string]string `json:"query_params"`
+}
+
+type APITFLiveReloadingSummary struct {
+	Message       string                       `json:"message"`
+	ModelMetadata map[string]TFModelIDMetadata `json:"model_metadata"`
+}
+
+type TFModelIDMetadata struct {
+	DiskPath        string                    `json:"disk_path"`
+	SignatureKey    string                    `json:"signature_key"`
+	InputSignatures map[string]InputSignature `json:"input_signatures"`
+	Timestamp       int64                     `json:"timestamp"`
+	SignatureDef    map[string]interface{}    `json:"signature_def"`
+}
+
 type InputSignature struct {
 	Shape []interface{} `json:"shape"`
 	Type  string        `json:"type"`
 }
 
-type InputSignatures map[string]InputSignature
+type APIModelSummary struct {
+	Message       string                          `json:"message"`
+	ModelMetadata map[string]GenericModelMetadata `json:"model_metadata"`
+}
 
-type APISummary struct {
-	Message         string                     `json:"message"`
-	ModelSignatures map[string]InputSignatures `json:"model_signatures"`
+type GenericModelMetadata struct {
+	Versions   []string `json:"versions"`
+	Timestamps []int64  `json:"timestamps"`
+}
+
+type APIVersion struct {
+	APIID       string `json:"api_id"`
+	LastUpdated int64  `json:"last_updated"`
 }

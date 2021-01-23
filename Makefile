@@ -1,4 +1,6 @@
-# Copyright 2020 Cortex Labs, Inc.
+#!make
+
+# Copyright 2021 Cortex Labs, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -13,6 +15,10 @@
 # limitations under the License.
 
 SHELL := /bin/bash
+export BASH_ENV=./dev/config/env.sh
+
+# declare all targets as phony to avoid collisions with local files or folders
+.PHONY: $(MAKECMDGOALS)
 
 #######
 # Dev #
@@ -21,11 +27,13 @@ SHELL := /bin/bash
 # Cortex
 
 # build cli, start local operator, and watch for changes
-devstart:
-	@$(MAKE) operator-stop || true
-	@./dev/operator_local.sh || true
+devstart-aws:
+	@$(MAKE) operator-stop-aws || true
+	@./dev/operator_local.sh -p aws || true
+devstart-gcp:
+	@$(MAKE) operator-stop-gcp || true
+	@./dev/operator_local.sh -p gcp || true
 
-.PHONY: cli
 cli:
 	@mkdir -p ./bin
 	@go build -o ./bin/cortex ./cli
@@ -35,115 +43,211 @@ cli-watch:
 	@rerun -watch ./pkg ./cli -run sh -c "clear && echo 'building cli...' && go build -o ./bin/cortex ./cli && clear && echo '\033[1;32mCLI built\033[0m'" || true
 
 # start local operator and watch for changes
-operator-local:
-	@$(MAKE) operator-stop || true
-	@./dev/operator_local.sh --operator-only || true
+operator-local-aws:
+	@$(MAKE) operator-stop-aws || true
+	@./dev/operator_local.sh --operator-only -p aws || true
+operator-local-gcp:
+	@$(MAKE) operator-stop-gcp || true
+	@./dev/operator_local.sh --operator-only -p gcp || true
 
-# configure kubectl to point to the cluster specified in dev/config/cluster.yaml
-kubectl:
-	@eval $$(python3 ./manager/cluster_config_env.py ./dev/config/cluster.yaml) && eksctl utils write-kubeconfig --cluster="$$CORTEX_CLUSTER_NAME" --region="$$CORTEX_REGION" | grep -v "saved kubeconfig as" | grep -v "using region" | grep -v "eksctl version" || true
+# start local operator and attach the delve debugger to it (in server mode)
+operator-local-dbg-aws:
+	@$(MAKE) operator-stop-aws || true
+	@./dev/operator_local.sh --debug -p aws || true
+operator-local-dbg-gcp:
+	@$(MAKE) operator-stop-gcp || true
+	@./dev/operator_local.sh --debug -p gcp || true
 
-cluster-up:
-	@$(MAKE) registry-all
+# configure kubectl to point to the cluster specified in dev/config/cluster-[aws|gcp].yaml
+kubectl-aws:
+	@eval $$(python3 ./manager/cluster_config_env.py ./dev/config/cluster-aws.yaml) && eksctl utils write-kubeconfig --cluster="$$CORTEX_CLUSTER_NAME" --region="$$CORTEX_REGION" | (grep -v "saved kubeconfig as" | grep -v "using region" | grep -v "eksctl version" || true)
+kubectl-gcp:
+	@eval $$(python3 ./manager/cluster_config_env.py ./dev/config/cluster-gcp.yaml) && gcloud container clusters get-credentials "$$CORTEX_CLUSTER_NAME" --project "$$CORTEX_PROJECT" --region "$$CORTEX_ZONE" 2> /dev/stdout 1> /dev/null | (grep -v "Fetching cluster" | grep -v "kubeconfig entry generated" || true)
+
+cluster-up-aws:
+	@$(MAKE) images-all-aws
 	@$(MAKE) cli
 	@kill $(shell pgrep -f rerun) >/dev/null 2>&1 || true
-	@./bin/cortex -c=./dev/config/cluster.yaml cluster up
-	@$(MAKE) kubectl
-
-cluster-up-y:
-	@$(MAKE) registry-all
+	@eval $$(python3 ./manager/cluster_config_env.py ./dev/config/cluster-aws.yaml) && ./bin/cortex cluster up --config=./dev/config/cluster-aws.yaml --configure-env="$$CORTEX_CLUSTER_NAME-aws" --aws-key="$$AWS_ACCESS_KEY_ID" --aws-secret="$$AWS_SECRET_ACCESS_KEY" --cluster-aws-key="$$CLUSTER_AWS_ACCESS_KEY_ID" --cluster-aws-secret="$$CLUSTER_AWS_SECRET_ACCESS_KEY"
+	@$(MAKE) kubectl-aws
+cluster-up-gcp:
+	@$(MAKE) images-all-gcp
 	@$(MAKE) cli
 	@kill $(shell pgrep -f rerun) >/dev/null 2>&1 || true
-	@./bin/cortex -c=./dev/config/cluster.yaml cluster up --yes
-	@$(MAKE) kubectl
+	@eval $$(python3 ./manager/cluster_config_env.py ./dev/config/cluster-gcp.yaml) && ./bin/cortex cluster-gcp up --config=./dev/config/cluster-gcp.yaml --configure-env="$$CORTEX_CLUSTER_NAME-gcp"
+	@$(MAKE) kubectl-gcp
 
-cluster-down:
-	@$(MAKE) manager-local
+cluster-up-aws-y:
+	@$(MAKE) images-all-aws
 	@$(MAKE) cli
 	@kill $(shell pgrep -f rerun) >/dev/null 2>&1 || true
-	@./bin/cortex -c=./dev/config/cluster.yaml cluster down
-
-cluster-down-y:
-	@$(MAKE) manager-local
+	@eval $$(python3 ./manager/cluster_config_env.py ./dev/config/cluster-aws.yaml) && ./bin/cortex cluster up --config=./dev/config/cluster-aws.yaml --configure-env="$$CORTEX_CLUSTER_NAME-aws" --aws-key="$$AWS_ACCESS_KEY_ID" --aws-secret="$$AWS_SECRET_ACCESS_KEY" --cluster-aws-key="$$CLUSTER_AWS_ACCESS_KEY_ID" --cluster-aws-secret="$$CLUSTER_AWS_SECRET_ACCESS_KEY" --yes
+	@$(MAKE) kubectl-aws
+cluster-up-gcp-y:
+	@$(MAKE) images-all-gcp
 	@$(MAKE) cli
 	@kill $(shell pgrep -f rerun) >/dev/null 2>&1 || true
-	@./bin/cortex -c=./dev/config/cluster.yaml cluster down --yes
+	@eval $$(python3 ./manager/cluster_config_env.py ./dev/config/cluster-gcp.yaml) && ./bin/cortex cluster-gcp up --config=./dev/config/cluster-gcp.yaml --configure-env="$$CORTEX_CLUSTER_NAME-gcp" --yes
+	@$(MAKE) kubectl-gcp
 
-cluster-info:
-	@$(MAKE) manager-local
-	@$(MAKE) cli
-	@./bin/cortex -c=./dev/config/cluster.yaml cluster info
-
-cluster-configure:
-	@$(MAKE) registry-all
+cluster-down-aws:
+	@$(MAKE) images-manager-skip-push
 	@$(MAKE) cli
 	@kill $(shell pgrep -f rerun) >/dev/null 2>&1 || true
-	@./bin/cortex -c=./dev/config/cluster.yaml cluster configure
-
-cluster-configure-y:
-	@$(MAKE) registry-all
+	@./bin/cortex cluster down --config=./dev/config/cluster-aws.yaml --aws-key="$$AWS_ACCESS_KEY_ID" --aws-secret=$$AWS_SECRET_ACCESS_KEY
+cluster-down-gcp:
+	@$(MAKE) images-manager-skip-push
 	@$(MAKE) cli
 	@kill $(shell pgrep -f rerun) >/dev/null 2>&1 || true
-	@./bin/cortex -c=./dev/config/cluster.yaml cluster configure --yes
+	@./bin/cortex cluster-gcp down --config=./dev/config/cluster-gcp.yaml
+
+cluster-down-aws-y:
+	@$(MAKE) images-manager-skip-push
+	@$(MAKE) cli
+	@kill $(shell pgrep -f rerun) >/dev/null 2>&1 || true
+	@./bin/cortex cluster down --config=./dev/config/cluster-aws.yaml --aws-key="$$AWS_ACCESS_KEY_ID" --aws-secret="$$AWS_SECRET_ACCESS_KEY" --yes
+cluster-down-gcp-y:
+	@$(MAKE) images-manager-skip-push
+	@$(MAKE) cli
+	@kill $(shell pgrep -f rerun) >/dev/null 2>&1 || true
+	@./bin/cortex cluster-gcp down --config=./dev/config/cluster-gcp.yaml --yes
+
+cluster-info-aws:
+	@$(MAKE) images-manager-skip-push
+	@$(MAKE) cli
+	@eval $$(python3 ./manager/cluster_config_env.py ./dev/config/cluster-aws.yaml) && ./bin/cortex cluster info --config=./dev/config/cluster-aws.yaml --configure-env="$$CORTEX_CLUSTER_NAME-aws" --aws-key="$$AWS_ACCESS_KEY_ID" --aws-secret="$$AWS_SECRET_ACCESS_KEY" --yes
+cluster-info-gcp:
+	@$(MAKE) images-manager-skip-push
+	@$(MAKE) cli
+	@eval $$(python3 ./manager/cluster_config_env.py ./dev/config/cluster-gcp.yaml) && ./bin/cortex cluster-gcp info --config=./dev/config/cluster-gcp.yaml --configure-env="$$CORTEX_CLUSTER_NAME-gcp" --yes
+
+cluster-configure-aws:
+	@$(MAKE) images-all-aws
+	@$(MAKE) cli
+	@kill $(shell pgrep -f rerun) >/dev/null 2>&1 || true
+	@eval $$(python3 ./manager/cluster_config_env.py ./dev/config/cluster-aws.yaml) && ./bin/cortex cluster configure --config=./dev/config/cluster-aws.yaml --configure-env="$$CORTEX_CLUSTER_NAME-aws" --aws-key="$$AWS_ACCESS_KEY_ID" --aws-secret="$$AWS_SECRET_ACCESS_KEY" --cluster-aws-key="$$CLUSTER_AWS_ACCESS_KEY_ID" --cluster-aws-secret="$$CLUSTER_AWS_SECRET_ACCESS_KEY"
+# cluster-configure-gcp:
+# 	@$(MAKE) images-all-gcp
+# 	@$(MAKE) cli
+# 	@kill $(shell pgrep -f rerun) >/dev/null 2>&1 || true
+# 	@eval $$(python3 ./manager/cluster_config_env.py ./dev/config/cluster-gcp.yaml) && ./bin/cortex cluster-gcp configure --config=./dev/config/cluster-gcp.yaml --configure-env="$$CORTEX_CLUSTER_NAME-gcp"
+
+cluster-configure-aws-y:
+	@$(MAKE) images-all-aws
+	@$(MAKE) cli
+	@kill $(shell pgrep -f rerun) >/dev/null 2>&1 || true
+	@eval $$(python3 ./manager/cluster_config_env.py ./dev/config/cluster-aws.yaml) && ./bin/cortex cluster configure --config=./dev/config/cluster-aws.yaml --configure-env="$$CORTEX_CLUSTER_NAME-aws" --aws-key="$$AWS_ACCESS_KEY_ID" --aws-secret="$$AWS_SECRET_ACCESS_KEY" --cluster-aws-key="$$CLUSTER_AWS_ACCESS_KEY_ID" --cluster-aws-secret="$$CLUSTER_AWS_SECRET_ACCESS_KEY" --yes
+# cluster-configure-gcp-y:
+# 	@$(MAKE) images-all-gcp
+# 	@$(MAKE) cli
+# 	@kill $(shell pgrep -f rerun) >/dev/null 2>&1 || true
+# 	@eval $$(python3 ./manager/cluster_config_env.py ./dev/config/cluster-gcp.yaml) && ./bin/cortex cluster-gcp configure --config=./dev/config/cluster-gcp.yaml --configure-env="$$CORTEX_CLUSTER_NAME-gcp" --yes
 
 # stop the in-cluster operator
-operator-stop:
-	@$(MAKE) kubectl
-	@kubectl delete --namespace=default --ignore-not-found=true deployment operator
+operator-stop-aws:
+	@$(MAKE) kubectl-aws
+	@kubectl scale --namespace=default deployments/operator --replicas=0
+operator-stop-gcp:
+	@$(MAKE) kubectl-gcp
+	@kubectl scale --namespace=default deployments/operator --replicas=0
+
+# start the in-cluster operator
+operator-start-aws:
+	@$(MAKE) kubectl-aws
+	@kubectl scale --namespace=default deployments/operator --replicas=1
+	@operator_pod=$$(kubectl get pods -l workloadID=operator --namespace=default -o jsonpath='{.items[0].metadata.name}') && kubectl wait --for=condition=ready pod $$operator_pod --namespace=default
+operator-start-gcp:
+	@$(MAKE) kubectl-gcp
+	@kubectl scale --namespace=default deployments/operator --replicas=1
+	@operator_pod=$$(kubectl get pods -l workloadID=operator --namespace=default -o jsonpath='{.items[0].metadata.name}') && kubectl wait --for=condition=ready pod $$operator_pod --namespace=default
+
+# restart the in-cluster operator
+operator-restart-aws:
+	@$(MAKE) kubectl-aws
+	@kubectl delete pods -l workloadID=operator --namespace=default
+	@operator_pod=$$(kubectl get pods -l workloadID=operator --namespace=default -o jsonpath='{.items[0].metadata.name}') && kubectl wait --for=condition=ready pod $$operator_pod --namespace=default
+operator-restart-gcp:
+	@$(MAKE) kubectl-gcp
+	@kubectl delete pods -l workloadID=operator --namespace=default
+	@operator_pod=$$(kubectl get pods -l workloadID=operator -o jsonpath='{.items[0].metadata.name}') && kubectl wait --for=condition=ready pod $$operator_pod --namespace=default
+
+# build and update the in-cluster operator
+operator-update-aws:
+	@$(MAKE) kubectl-aws
+	@kubectl scale --namespace=default deployments/operator --replicas=0
+	@./dev/registry.sh update-single operator -p aws
+	@kubectl scale --namespace=default deployments/operator --replicas=1
+	@operator_pod=$$(kubectl get pods -l workloadID=operator --namespace=default -o jsonpath='{.items[0].metadata.name}') && kubectl wait --for=condition=ready pod $$operator_pod --namespace=default
+operator-update-gcp:
+	@$(MAKE) kubectl-gcp
+	@kubectl scale --namespace=default deployments/operator --replicas=0
+	@./dev/registry.sh update-single operator -p gcp
+	@kubectl scale --namespace=default deployments/operator --replicas=1
+	@operator_pod=$$(kubectl get pods -l workloadID=operator --namespace=default -o jsonpath='{.items[0].metadata.name}') && kubectl wait --for=condition=ready pod $$operator_pod --namespace=default
 
 # Docker images
 
-registry-all:
+images-all-skip-push:
 	@./dev/registry.sh update all
-registry-all-local:
-	@./dev/registry.sh update all --skip-push
-registry-all-slim:
+images-all-aws:
+	@./dev/registry.sh update all -p aws
+images-all-gcp:
+	@./dev/registry.sh update all -p gcp
+images-all-slim-skip-push:
 	@./dev/registry.sh update all --include-slim
-registry-all-slim-local:
-	@./dev/registry.sh update all --include-slim --skip-push
-registry-all-local-slim:
-	@./dev/registry.sh update all --include-slim --skip-push
+images-all-slim-aws:
+	@./dev/registry.sh update all -p aws --include-slim
+images-all-slim-gcp:
+	@./dev/registry.sh update all -p gcp --include-slim
 
-registry-dev:
+images-dev-skip-push:
 	@./dev/registry.sh update dev
-registry-dev-local:
-	@./dev/registry.sh update dev --skip-push
-registry-dev-slim:
+images-dev-aws:
+	@./dev/registry.sh update dev -p aws
+images-dev-gcp:
+	@./dev/registry.sh update dev -p gcp
+images-dev-slim-skip-push:
 	@./dev/registry.sh update dev --include-slim
-registry-dev-slim-local:
-	@./dev/registry.sh update dev --include-slim --skip-push
-registry-dev-local-slim:
-	@./dev/registry.sh update dev --include-slim --skip-push
+images-dev-slim-aws:
+	@./dev/registry.sh update dev -p aws --include-slim
+images-dev-slim-gcp:
+	@./dev/registry.sh update dev -p gcp --include-slim
 
-registry-api:
+images-api-skip-push:
 	@./dev/registry.sh update api
-registry-api-local:
-	@./dev/registry.sh update api --skip-push
-registry-api-slim:
+images-api-aws:
+	@./dev/registry.sh update api -p aws
+images-api-gcp:
+	@./dev/registry.sh update api -p gcp
+images-api-slim-skip-push:
 	@./dev/registry.sh update api --include-slim
-registry-api-slim-local:
-	@./dev/registry.sh update api --include-slim --skip-push
-registry-api-local-slim:
-	@./dev/registry.sh update api --include-slim --skip-push
+images-api-slim-aws:
+	@./dev/registry.sh update api -p aws --include-slim
+images-api-slim-gcp:
+	@./dev/registry.sh update api -p gcp --include-slim
 
-registry-create:
-	@./dev/registry.sh create
+images-manager-skip-push:
+	@./dev/registry.sh update-single manager
+images-iris-aws:
+	@./dev/registry.sh update-single python-predictor-cpu -p aws
+images-iris-gcp:
+	@./dev/registry.sh update-single python-predictor-cpu -p gcp
 
-registry-clean:
-	@./dev/registry.sh clean
+registry-create-aws:
+	@./dev/registry.sh create -p aws
 
-manager-local:
-	@./dev/registry.sh update-manager-local
+registry-clean-aws:
+	@./dev/registry.sh clean -p aws
 
 # Misc
-
-aws-clear-bucket:
-	@./dev/aws.sh clear-bucket
 
 tools:
 	@go get -u -v golang.org/x/lint/golint
 	@go get -u -v github.com/VojtechVitek/rerun/cmd/rerun
-	@python3 -m pip install black
+	@go get -u -v github.com/go-delve/delve/cmd/dlv
+	@if [[ "$$OSTYPE" == "darwin"* ]]; then brew install parallel; elif [[ "$$OSTYPE" == "linux"* ]]; then sudo apt-get install -y parallel; else echo "your operating system is not supported"; fi
+	@python3 -m pip install aiohttp black 'pydoc-markdown>=3.0.0,<4.0.0'
+	@python3 -m pip install -e test/e2e
 
 format:
 	@./dev/format.sh
@@ -161,60 +265,48 @@ test-go:
 test-python:
 	@./build/test.sh python
 
+# run e2e tests on existing cluster
+# read test/e2e/README.md for instructions first
+test-e2e:
+	@$(MAKE) test-e2e-aws
+	@$(MAKE) test-e2e-gcp
+test-e2e-aws:
+	@$(MAKE) images-all-aws
+	@$(MAKE) operator-restart-aws
+	@eval $$(python3 ./manager/cluster_config_env.py ./dev/config/cluster-aws.yaml) && CORTEX_CLI_PATH="$$(pwd)/bin/cortex" ./build/test.sh e2e -p aws -e "$$CORTEX_CLUSTER_NAME-aws"
+test-e2e-gcp:
+	@$(MAKE) images-all-gcp
+	@$(MAKE) operator-restart-gcp
+	@eval $$(python3 ./manager/cluster_config_env.py ./dev/config/cluster-gcp.yaml) && CORTEX_CLI_PATH="$$(pwd)/bin/cortex" ./build/test.sh e2e -p gcp -e "$$CORTEX_CLUSTER_NAME-gcp"
+
+# run e2e tests with new clusters
+# read test/e2e/README.md for instructions first
+test-e2e-new:
+	@$(MAKE) test-e2e-new-aws
+	@$(MAKE) test-e2e-new-gcp
+test-e2e-new-aws:
+	@$(MAKE) images-all-aws
+	@eval $$(python3 ./manager/cluster_config_env.py ./dev/config/cluster-aws.yaml) && CORTEX_CLI_PATH="$$(pwd)/bin/cortex" ./build/test.sh e2e "$$(pwd)/dev/config/cluster-aws.yaml" -p aws --create-cluster
+test-e2e-new-gcp:
+	@$(MAKE) images-all-gcp
+	@eval $$(python3 ./manager/cluster_config_env.py ./dev/config/cluster-gcp.yaml) && CORTEX_CLI_PATH="$$(pwd)/bin/cortex" ./build/test.sh e2e "$$(pwd)/dev/config/cluster-gcp.yaml" -p gcp --create-cluster
+
 lint:
 	@./build/lint.sh
 
-test-examples:
-	@$(MAKE) registry-all
-	@./build/test-examples.sh
+# this is a subset of lint.sh, and is only meant to be run on master
+lint-docs:
+	@./build/lint-docs.sh
 
 ###############
 # CI Commands #
 ###############
 
 ci-build-images:
-	@./build/build-image.sh images/python-predictor-cpu python-predictor-cpu --include-slim
-	@./build/build-image.sh images/python-predictor-gpu python-predictor-gpu --include-slim
-	@./build/build-image.sh images/tensorflow-serving-cpu tensorflow-serving-cpu
-	@./build/build-image.sh images/tensorflow-serving-gpu tensorflow-serving-gpu
-	@./build/build-image.sh images/tensorflow-predictor tensorflow-predictor --include-slim
-	@./build/build-image.sh images/onnx-predictor-cpu onnx-predictor-cpu --include-slim
-	@./build/build-image.sh images/onnx-predictor-gpu onnx-predictor-gpu --include-slim
-	@./build/build-image.sh images/operator operator
-	@./build/build-image.sh images/manager manager
-	@./build/build-image.sh images/downloader downloader
-	@./build/build-image.sh images/request-monitor request-monitor
-	@./build/build-image.sh images/cluster-autoscaler cluster-autoscaler
-	@./build/build-image.sh images/metrics-server metrics-server
-	@./build/build-image.sh images/nvidia nvidia
-	@./build/build-image.sh images/fluentd fluentd
-	@./build/build-image.sh images/statsd statsd
-	@./build/build-image.sh images/istio-proxy istio-proxy
-	@./build/build-image.sh images/istio-pilot istio-pilot
-	@./build/build-image.sh images/istio-citadel istio-citadel
-	@./build/build-image.sh images/istio-galley istio-galley
+	@./build/build-images.sh
 
 ci-push-images:
-	@./build/push-image.sh python-predictor-cpu --include-slim
-	@./build/push-image.sh python-predictor-gpu --include-slim
-	@./build/push-image.sh tensorflow-serving-cpu
-	@./build/push-image.sh tensorflow-serving-gpu
-	@./build/push-image.sh tensorflow-predictor --include-slim
-	@./build/push-image.sh onnx-predictor-cpu --include-slim
-	@./build/push-image.sh onnx-predictor-gpu --include-slim
-	@./build/push-image.sh operator
-	@./build/push-image.sh manager
-	@./build/push-image.sh downloader
-	@./build/push-image.sh request-monitor
-	@./build/push-image.sh cluster-autoscaler
-	@./build/push-image.sh metrics-server
-	@./build/push-image.sh nvidia
-	@./build/push-image.sh fluentd
-	@./build/push-image.sh statsd
-	@./build/push-image.sh istio-proxy
-	@./build/push-image.sh istio-pilot
-	@./build/push-image.sh istio-citadel
-	@./build/push-image.sh istio-galley
+	@./build/push-images.sh
 
 ci-build-cli:
 	@./build/cli.sh

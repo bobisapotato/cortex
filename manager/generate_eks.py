@@ -1,4 +1,4 @@
-# Copyright 2020 Cortex Labs, Inc.
+# Copyright 2021 Cortex Labs, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -61,10 +61,8 @@ def apply_worker_settings(nodegroup):
 
 
 def apply_clusterconfig(nodegroup, config):
-
     clusterconfig_settings = {
         "instanceType": config["instance_type"],
-        "availabilityZones": config["availability_zones"],
         "volumeSize": config["instance_volume_size"],
         "minSize": config["min_instances"],
         "maxSize": config["max_instances"],
@@ -118,6 +116,42 @@ def is_gpu(instance_type):
     return instance_type.startswith("g") or instance_type.startswith("p")
 
 
+def apply_inf_settings(nodegroup, cluster_config):
+    instance_type = cluster_config["instance_type"]
+    instance_region = cluster_config["region"]
+
+    num_chips, hugepages_mem = get_inf_resources(instance_type)
+    inf_settings = {
+        "tags": {
+            "k8s.io/cluster-autoscaler/node-template/label/aws.amazon.com/neuron": "true",
+            "k8s.io/cluster-autoscaler/node-template/taint/dedicated": "aws.amazon.com/neuron=true",
+            "k8s.io/cluster-autoscaler/node-template/resources/aws.amazon.com/neuron": str(
+                num_chips
+            ),
+            "k8s.io/cluster-autoscaler/node-template/resources/hugepages-2Mi": hugepages_mem,
+        },
+        "labels": {"aws.amazon.com/neuron": "true"},
+        "taints": {"aws.amazon.com/neuron": "true:NoSchedule"},
+    }
+    return merge_override(nodegroup, inf_settings)
+
+
+def is_inf(instance_type):
+    return instance_type.startswith("inf")
+
+
+def get_inf_resources(instance_type):
+    num_chips = 0
+    if instance_type in ["inf1.xlarge", "inf1.2xlarge"]:
+        num_chips = 1
+    elif instance_type == "inf1.6xlarge":
+        num_chips = 4
+    elif instance_type == "inf1.24xlarge":
+        num_chips = 16
+
+    return num_chips, f"{128 * num_chips}Mi"
+
+
 def generate_eks(cluster_config_path):
     with open(cluster_config_path, "r") as f:
         cluster_config = yaml.safe_load(f)
@@ -126,7 +160,6 @@ def generate_eks(cluster_config_path):
     operator_settings = {
         "name": "ng-cortex-operator",
         "instanceType": "t3.medium",
-        "availabilityZones": cluster_config["availability_zones"],
         "minSize": 1,
         "maxSize": 1,
         "desiredCapacity": 1,
@@ -144,6 +177,9 @@ def generate_eks(cluster_config_path):
     if is_gpu(cluster_config["instance_type"]):
         apply_gpu_settings(worker_nodegroup)
 
+    if is_inf(cluster_config["instance_type"]):
+        apply_inf_settings(worker_nodegroup, cluster_config)
+
     nat_gateway = "Disable"
     if cluster_config["nat_gateway"] == "single":
         nat_gateway = "Single"
@@ -156,13 +192,33 @@ def generate_eks(cluster_config_path):
         "metadata": {
             "name": cluster_config["cluster_name"],
             "region": cluster_config["region"],
-            "version": "1.16",
+            "version": "1.17",
             "tags": cluster_config["tags"],
         },
         "vpc": {"nat": {"gateway": nat_gateway}},
-        "availabilityZones": cluster_config["availability_zones"],
         "nodeGroups": [operator_nodegroup, worker_nodegroup],
     }
+
+    if (
+        len(cluster_config.get("availability_zones", [])) > 0
+        and len(cluster_config.get("subnets", [])) == 0
+    ):
+        eks["availabilityZones"] = cluster_config["availability_zones"]
+
+    if len(cluster_config.get("subnets", [])) > 0:
+        eks_subnet_configs = {}
+        for subnet_config in cluster_config["subnets"]:
+            eks_subnet_configs[subnet_config["availability_zone"]] = {
+                "id": subnet_config["subnet_id"]
+            }
+
+        if cluster_config.get("subnet_visibility", "public") == "private":
+            eks["vpc"]["subnets"] = {"private": eks_subnet_configs}
+        else:
+            eks["vpc"]["subnets"] = {"public": eks_subnet_configs}
+
+    if cluster_config.get("vpc_cidr", "") != "":
+        eks["vpc"]["cidr"] = cluster_config["vpc_cidr"]
 
     if cluster_config.get("spot_config") is not None and cluster_config["spot_config"].get(
         "on_demand_backup", False
@@ -172,6 +228,8 @@ def generate_eks(cluster_config_path):
         apply_clusterconfig(backup_nodegroup, cluster_config)
         if is_gpu(cluster_config["instance_type"]):
             apply_gpu_settings(backup_nodegroup)
+        if is_inf(cluster_config["instance_type"]):
+            apply_inf_settings(backup_nodegroup, cluster_config)
 
         backup_nodegroup["minSize"] = 0
         backup_nodegroup["desiredCapacity"] = 0

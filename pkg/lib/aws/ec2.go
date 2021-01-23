@@ -1,5 +1,5 @@
 /*
-Copyright 2020 Cortex Labs, Inc.
+Copyright 2021 Cortex Labs, Inc.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -18,6 +18,7 @@ package aws
 
 import (
 	"math"
+	"regexp"
 	"time"
 
 	"github.com/aws/aws-sdk-go/aws"
@@ -28,7 +29,20 @@ import (
 	s "github.com/cortexlabs/cortex/pkg/lib/strings"
 )
 
-func (c *Client) SpotInstancePrice(region string, instanceType string) (float64, error) {
+// aws instance types take this form: (\w+)([0-9]+)(\w*).(\w+)
+// the first group is the instance series, e.g. "m", "t", "g", "inf", ...
+// the second group is a version number for that series, e.g. 3, 4, ...
+// the third group is optional, and is a set of single-character "flags"
+//   "g" represents ARM (graviton), "a" for AMD, "n" for fast networking, "d" for fast storage, etc.
+// the fourth and final group (after the dot) is the instance size, e.g. "large"
+var _armInstanceRegex = regexp.MustCompile(`^\w+[0-9]+\w*g\w*\.\w+$`)
+
+// instanceType must be a valid instance type that exists in AWS, e.g. g4dn.xlarge
+func IsARMInstance(instanceType string) bool {
+	return _armInstanceRegex.MatchString(instanceType)
+}
+
+func (c *Client) SpotInstancePrice(instanceType string) (float64, error) {
 	result, err := c.EC2().DescribeSpotPriceHistory(&ec2.DescribeSpotPriceHistoryInput{
 		InstanceTypes:       []*string{aws.String(instanceType)},
 		ProductDescriptions: []*string{aws.String("Linux/UNIX")},
@@ -56,11 +70,11 @@ func (c *Client) SpotInstancePrice(region string, instanceType string) (float64,
 	}
 
 	if min == math.MaxFloat64 {
-		return 0, ErrorNoValidSpotPrices(instanceType, region)
+		return 0, ErrorNoValidSpotPrices(instanceType, c.Region)
 	}
 
 	if min <= 0 {
-		return 0, ErrorNoValidSpotPrices(instanceType, region)
+		return 0, ErrorNoValidSpotPrices(instanceType, c.Region)
 	}
 
 	return min, nil

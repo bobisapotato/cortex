@@ -1,5 +1,5 @@
 /*
-Copyright 2020 Cortex Labs, Inc.
+Copyright 2021 Cortex Labs, Inc.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -21,13 +21,15 @@ import (
 	"runtime"
 	"strings"
 
+	"github.com/cortexlabs/cortex/pkg/consts"
 	"github.com/cortexlabs/cortex/pkg/lib/errors"
 )
 
 const (
-	ErrConnectToDockerDaemon = "docker.connect_to_docker_daemon"
-	ErrDockerPermissions     = "docker.docker_permissions"
-	ErrImageInaccessible     = "docker.image_inaccessible"
+	ErrConnectToDockerDaemon   = "docker.connect_to_docker_daemon"
+	ErrDockerPermissions       = "docker.docker_permissions"
+	ErrImageDoesntExistLocally = "docker.image_doesnt_exist_locally"
+	ErrImageInaccessible       = "docker.image_inaccessible"
 )
 
 func ErrorConnectToDockerDaemon() error {
@@ -56,10 +58,22 @@ func ErrorDockerPermissions(err error) error {
 	})
 }
 
+func ErrorImageDoesntExistLocally(image string) error {
+	return errors.WithStack(&errors.Error{
+		Kind:    ErrImageDoesntExistLocally,
+		Message: fmt.Sprintf("%s does not exist locally; download it with `docker pull %s` (if your registry is private, run `docker login` first)", image, image),
+	})
+}
+
 func ErrorImageInaccessible(image string, cause error) error {
 	message := fmt.Sprintf("%s is not accessible", image)
+
 	if cause != nil {
-		message += "\n" + errors.Message(cause) // add \n because docker client errors are
+		message += "\n" + errors.Message(cause) // add \n because docker client errors are verbose but useful
+	}
+
+	if strings.Contains(cause.Error(), "auth") {
+		message += fmt.Sprintf("\n\nif you would like to use a private docker registry, see https://docs.cortex.dev/v/%s/", consts.CortexVersionMinor)
 	}
 
 	return errors.WithStack(&errors.Error{

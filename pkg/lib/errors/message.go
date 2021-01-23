@@ -1,5 +1,5 @@
 /*
-Copyright 2020 Cortex Labs, Inc.
+Copyright 2021 Cortex Labs, Inc.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,7 +17,6 @@ limitations under the License.
 package errors
 
 import (
-	"fmt"
 	"strings"
 
 	"github.com/aws/aws-sdk-go/aws/awserr"
@@ -25,16 +24,16 @@ import (
 )
 
 func PrintError(err error, strs ...string) {
-	fmt.Println(errorStr(err, strs...))
+	print.StderrPrintln(ErrorStr(err, strs...))
 	// PrintStacktrace(err)
 }
 
 func PrintErrorForUser(err error, strs ...string) {
-	print.BoldFirstLine(errorStr(err, strs...))
+	print.StderrBoldFirstLine(ErrorStr(err, strs...))
 	// PrintStacktrace(err)
 }
 
-func errorStr(err error, strs ...string) string {
+func ErrorStr(err error, strs ...string) string {
 	wrappedErr := Wrap(err, strs...)
 	return "error: " + strings.TrimSpace(Message(wrappedErr))
 }

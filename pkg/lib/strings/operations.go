@@ -1,5 +1,5 @@
 /*
-Copyright 2020 Cortex Labs, Inc.
+Copyright 2021 Cortex Labs, Inc.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -18,12 +18,21 @@ package strings
 
 import (
 	"strings"
+	"unicode"
 
 	"github.com/cortexlabs/cortex/pkg/lib/cast"
 )
 
 func ToTitle(str string) string {
 	return strings.Title(strings.ToLower(str))
+}
+
+func EnsureSingleOccurrenceCharPrefix(str string, character string) string {
+	return character + strings.TrimLeft(str, character)
+}
+
+func EnsureSingleOccurrenceCharSuffix(str string, character string) string {
+	return strings.TrimRight(str, character) + character
 }
 
 func EnsurePrefix(str string, prefix string) string {
@@ -53,8 +62,12 @@ func EnsureBlankLineIfNotEmpty(str string) string {
 	return str + "\n\n"
 }
 
-func RemoveTrailingNewLines(str string) string {
+func TrimTrailingNewLines(str string) string {
 	return strings.TrimRight(str, "\n")
+}
+
+func TrimTrailingWhitespace(str string) string {
+	return strings.TrimRightFunc(str, unicode.IsSpace)
 }
 
 func EnsureSingleTrailingNewLine(str string) string {
@@ -75,6 +88,21 @@ func MaskString(str string, numPlain int) string {
 		numPlain = len(str) / 2
 	}
 	return strings.Repeat("*", len(str)-numPlain) + str[len(str)-numPlain:]
+}
+
+// Returns the portion str after the last occurrance of chars, or the entire str if chars are not found
+func LastSplit(str string, chars string) string {
+	split := strings.Split(str, chars)
+	return split[len(split)-1]
+}
+
+// Returns the last n chars, or the entire string if the requested length is greater than the length of the string
+func LastNChars(str string, n int) string {
+	if len(str) < n {
+		return str
+	}
+
+	return str[len(str)-n:]
 }
 
 func LongestCommonPrefix(strs ...string) string {
@@ -165,6 +193,22 @@ func StrsSentence(strs []string, lastJoinWord string) string {
 		lastIndex := len(strs) - 1
 		return strings.Join(strs[:lastIndex], ", ") + ", " + lastJoinWord + " " + strs[lastIndex]
 	}
+}
+
+func SIfPlural(count interface{}) string {
+	return StrIfPlural("s", count)
+}
+
+func EsIfPlural(count interface{}) string {
+	return StrIfPlural("es", count)
+}
+
+func StrIfPlural(str string, count interface{}) string {
+	countInt, _ := cast.InterfaceToInt64(count)
+	if countInt > 1 {
+		return str
+	}
+	return ""
 }
 
 func PluralS(str string, count interface{}) string {

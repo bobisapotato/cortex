@@ -1,5 +1,5 @@
 /*
-Copyright 2020 Cortex Labs, Inc.
+Copyright 2021 Cortex Labs, Inc.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -25,6 +25,7 @@ import (
 	"os/signal"
 	"strings"
 
+	"github.com/cortexlabs/cortex/cli/lib/routines"
 	"github.com/cortexlabs/cortex/pkg/consts"
 	"github.com/cortexlabs/cortex/pkg/lib/errors"
 	"github.com/cortexlabs/cortex/pkg/lib/exit"
@@ -34,10 +35,18 @@ import (
 )
 
 func StreamLogs(operatorConfig OperatorConfig, apiName string) error {
+	return streamLogs(operatorConfig, "/logs/"+apiName)
+}
+
+func StreamJobLogs(operatorConfig OperatorConfig, apiName string, jobID string) error {
+	return streamLogs(operatorConfig, "/logs/"+apiName, map[string]string{"jobID": jobID})
+}
+
+func streamLogs(operatorConfig OperatorConfig, path string, qParams ...map[string]string) error {
 	interrupt := make(chan os.Signal, 1)
 	signal.Notify(interrupt, os.Interrupt)
 
-	req, err := operatorRequest(operatorConfig, "GET", "/logs/"+apiName, nil, nil)
+	req, err := operatorRequest(operatorConfig, "GET", path, nil, qParams...)
 	if err != nil {
 		return err
 	}
@@ -90,16 +99,16 @@ func StreamLogs(operatorConfig OperatorConfig, apiName string) error {
 }
 
 func handleConnection(connection *websocket.Conn, done chan struct{}) {
-	go func() {
+	routines.RunWithPanicHandler(func() {
 		defer close(done)
 		for {
 			_, message, err := connection.ReadMessage()
 			if err != nil {
 				exit.Error(ErrorOperatorSocketRead(err))
 			}
-			fmt.Println(string(message))
+			fmt.Print(string(message))
 		}
-	}()
+	}, false)
 }
 
 func closeConnection(connection *websocket.Conn, done chan struct{}, interrupt chan os.Signal) {

@@ -1,5 +1,5 @@
 /*
-Copyright 2020 Cortex Labs, Inc.
+Copyright 2021 Cortex Labs, Inc.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,41 +17,30 @@ limitations under the License.
 package cmd
 
 import (
-	"crypto/tls"
 	"fmt"
-	"io/ioutil"
-	"net/http"
-	"sort"
 	"strings"
 	"time"
 
 	"github.com/cortexlabs/cortex/cli/cluster"
-	"github.com/cortexlabs/cortex/cli/local"
 	"github.com/cortexlabs/cortex/cli/types/cliconfig"
-	"github.com/cortexlabs/cortex/pkg/consts"
-	"github.com/cortexlabs/cortex/pkg/lib/cast"
+	"github.com/cortexlabs/cortex/cli/types/flags"
 	"github.com/cortexlabs/cortex/pkg/lib/console"
 	"github.com/cortexlabs/cortex/pkg/lib/errors"
 	"github.com/cortexlabs/cortex/pkg/lib/exit"
-	"github.com/cortexlabs/cortex/pkg/lib/json"
-	"github.com/cortexlabs/cortex/pkg/lib/sets/strset"
+	libjson "github.com/cortexlabs/cortex/pkg/lib/json"
+	"github.com/cortexlabs/cortex/pkg/lib/pointer"
 	s "github.com/cortexlabs/cortex/pkg/lib/strings"
 	"github.com/cortexlabs/cortex/pkg/lib/table"
 	"github.com/cortexlabs/cortex/pkg/lib/telemetry"
 	libtime "github.com/cortexlabs/cortex/pkg/lib/time"
-	"github.com/cortexlabs/cortex/pkg/lib/urls"
 	"github.com/cortexlabs/cortex/pkg/operator/schema"
-	"github.com/cortexlabs/cortex/pkg/types"
-	"github.com/cortexlabs/cortex/pkg/types/metrics"
-	"github.com/cortexlabs/cortex/pkg/types/spec"
-	"github.com/cortexlabs/cortex/pkg/types/status"
 	"github.com/cortexlabs/cortex/pkg/types/userconfig"
 	"github.com/spf13/cobra"
 )
 
 const (
 	_titleEnvironment = "env"
-	_titleAPI         = "api"
+	_titleRealtimeAPI = "realtime api"
 	_titleStatus      = "status"
 	_titleUpToDate    = "up-to-date"
 	_titleStale       = "stale"
@@ -71,18 +60,32 @@ var (
 
 func getInit() {
 	_getCmd.Flags().SortFlags = false
-	_getCmd.Flags().StringVarP(&_flagGetEnv, "env", "e", getDefaultEnv(_generalCommandType), "environment to use")
-	_getCmd.Flags().BoolVarP(&_flagWatch, "watch", "w", false, "re-run the command every second")
+	_getCmd.Flags().StringVarP(&_flagGetEnv, "env", "e", "", "environment to use")
+	_getCmd.Flags().BoolVarP(&_flagWatch, "watch", "w", false, "re-run the command every 2 seconds")
+	_getCmd.Flags().VarP(&_flagOutput, "output", "o", fmt.Sprintf("output format: one of %s", strings.Join(flags.UserOutputTypeStrings(), "|")))
+	addVerboseFlag(_getCmd)
 }
 
 var _getCmd = &cobra.Command{
-	Use:   "get [API_NAME]",
-	Short: "get information about apis",
-	Args:  cobra.RangeArgs(0, 1),
+	Use:   "get [API_NAME] [JOB_ID]",
+	Short: "get information about apis or jobs",
+	Args:  cobra.RangeArgs(0, 2),
 	Run: func(cmd *cobra.Command, args []string) {
+		var envName string
+		if wasEnvFlagProvided(cmd) {
+			envName = _flagGetEnv
+		} else if len(args) > 0 {
+			var err error
+			envName, err = getEnvFromFlag("")
+			if err != nil {
+				telemetry.Event("cli.get")
+				exit.Error(err)
+			}
+		}
+
 		// if API_NAME is specified or env name is provided then the provider is known, otherwise provider isn't because all apis from all environments will be fetched
-		if len(args) == 1 || wasEnvFlagProvided() {
-			env, err := ReadOrConfigureEnv(_flagGetEnv)
+		if len(args) == 1 || wasEnvFlagProvided(cmd) {
+			env, err := ReadOrConfigureEnv(envName)
 			if err != nil {
 				telemetry.Event("cli.get")
 				exit.Error(err)
@@ -94,48 +97,94 @@ var _getCmd = &cobra.Command{
 
 		rerun(func() (string, error) {
 			if len(args) == 1 {
-				env, err := ReadOrConfigureEnv(_flagGetEnv)
+				env, err := ReadOrConfigureEnv(envName)
 				if err != nil {
 					exit.Error(err)
 				}
 
-				out, err := envStringIfNotSpecified(_flagGetEnv)
+				out, err := envStringIfNotSpecified(envName, cmd)
 				if err != nil {
 					return "", err
 				}
-
 				apiTable, err := getAPI(env, args[0])
 				if err != nil {
 					return "", err
 				}
-				return out + apiTable, nil
-			}
 
-			if wasEnvFlagProvided() {
-				env, err := ReadOrConfigureEnv(_flagGetEnv)
+				if _flagOutput == flags.JSONOutputType {
+					return apiTable, nil
+				}
+
+				return out + apiTable, nil
+			} else if len(args) == 2 {
+				env, err := ReadOrConfigureEnv(envName)
 				if err != nil {
 					exit.Error(err)
 				}
 
-				out, err := envStringIfNotSpecified(_flagGetEnv)
+				out, err := envStringIfNotSpecified(envName, cmd)
 				if err != nil {
 					return "", err
 				}
 
-				apiTable, err := getAPIs(env, false)
+				apisRes, err := cluster.GetAPI(MustGetOperatorConfig(envName), args[0])
 				if err != nil {
 					return "", err
 				}
-				return out + apiTable, nil
+
+				var jobTable string
+				if apisRes[0].Spec.Kind == userconfig.BatchAPIKind {
+					jobTable, err = getBatchJob(env, args[0], args[1])
+				} else {
+					jobTable, err = getTaskJob(env, args[0], args[1])
+				}
+				if err != nil {
+					return "", err
+				}
+				if _flagOutput == flags.JSONOutputType {
+					return jobTable, nil
+				}
+
+				return out + jobTable, nil
+			} else {
+				envs, err := listConfiguredEnvs()
+				if err != nil {
+					return "", err
+				}
+				if len(envs) == 0 {
+					return "", ErrorNoAvailableEnvironment()
+				}
+
+				if wasEnvFlagProvided(cmd) {
+					env, err := ReadOrConfigureEnv(envName)
+					if err != nil {
+						exit.Error(err)
+					}
+
+					out, err := envStringIfNotSpecified(envName, cmd)
+					if err != nil {
+						return "", err
+					}
+
+					apiTable, err := getAPIsByEnv(env, false)
+					if err != nil {
+						return "", err
+					}
+
+					if _flagOutput == flags.JSONOutputType {
+						return apiTable, nil
+					}
+
+					return out + apiTable, nil
+				}
+
+				out, err := getAPIsInAllEnvironments()
+				if err != nil {
+					return "", err
+				}
+
+				return out, nil
 			}
-
-			out, err := getAPIsInAllEnvironments()
-
-			if err != nil {
-				return "", err
-			}
-
-			return out, nil
 		})
 	},
 }
@@ -146,52 +195,122 @@ func getAPIsInAllEnvironments() (string, error) {
 		return "", err
 	}
 
-	var allAPIs []spec.API
-	var allAPIStatuses []status.Status
-	var allMetrics []metrics.Metrics
-	var allEnvs []string
+	var allRealtimeAPIs []schema.APIResponse
+	var allRealtimeAPIEnvs []string
+	var allBatchAPIs []schema.APIResponse
+	var allBatchAPIEnvs []string
+	var allTaskAPIs []schema.APIResponse
+	var allTaskAPIEnvs []string
+	var allTrafficSplitters []schema.APIResponse
+	var allTrafficSplitterEnvs []string
+
+	type getAPIsOutput struct {
+		EnvName string               `json:"env_name"`
+		APIs    []schema.APIResponse `json:"apis"`
+		Error   string               `json:"error"`
+	}
+
+	allAPIsOutput := []getAPIsOutput{}
+
 	errorsMap := map[string]error{}
+	// get apis from both environments
 	for _, env := range cliConfig.Environments {
-		var apisRes schema.GetAPIsResponse
-		var err error
-		if env.Provider == types.AWSProviderType {
-			apisRes, err = cluster.GetAPIs(MustGetOperatorConfig(env.Name))
-		} else {
-			apisRes, err = local.GetAPIs()
+		apisRes, err := cluster.GetAPIs(MustGetOperatorConfig(env.Name))
+
+		apisOutput := getAPIsOutput{
+			EnvName: env.Name,
+			APIs:    apisRes,
 		}
 
 		if err == nil {
-			for range apisRes.APIs {
-				allEnvs = append(allEnvs, env.Name)
+			for _, api := range apisRes {
+				switch api.Spec.Kind {
+				case userconfig.BatchAPIKind:
+					allBatchAPIEnvs = append(allBatchAPIEnvs, env.Name)
+					allBatchAPIs = append(allBatchAPIs, api)
+				case userconfig.RealtimeAPIKind:
+					allRealtimeAPIEnvs = append(allRealtimeAPIEnvs, env.Name)
+					allRealtimeAPIs = append(allRealtimeAPIs, api)
+				case userconfig.TaskAPIKind:
+					allTaskAPIEnvs = append(allTaskAPIEnvs, env.Name)
+					allTaskAPIs = append(allTaskAPIs, api)
+				case userconfig.TrafficSplitterKind:
+					allTrafficSplitterEnvs = append(allTrafficSplitterEnvs, env.Name)
+					allTrafficSplitters = append(allTrafficSplitters, api)
+				}
 			}
-
-			allAPIs = append(allAPIs, apisRes.APIs...)
-			allAPIStatuses = append(allAPIStatuses, apisRes.Statuses...)
-			allMetrics = append(allMetrics, apisRes.AllMetrics...)
 		} else {
+			apisOutput.Error = err.Error()
 			errorsMap[env.Name] = err
 		}
+
+		allAPIsOutput = append(allAPIsOutput, apisOutput)
+	}
+
+	if _flagOutput == flags.JSONOutputType {
+		bytes, err := libjson.Marshal(allAPIsOutput)
+		if err != nil {
+			return "", err
+		}
+
+		return string(bytes), nil
 	}
 
 	out := ""
 
-	if len(allAPIs) == 0 {
-		if len(errorsMap) == 1 {
-			// Print the error if there is just one
-			exit.Error(errors.FirstErrorInMap(errorsMap))
-		}
-		// if all envs errored, skip it "no apis are deployed" since it's misleading
+	if len(allRealtimeAPIs) == 0 && len(allBatchAPIs) == 0 && len(allTrafficSplitters) == 0 && len(allTaskAPIs) == 0 {
+		// check if any environments errorred
 		if len(errorsMap) != len(cliConfig.Environments) {
-			out += console.Bold("no apis are deployed") + "\n"
+			if len(errorsMap) == 0 {
+				return console.Bold("no apis are deployed"), nil
+			}
+
+			var successfulEnvs []string
+			for _, env := range cliConfig.Environments {
+				if _, ok := errorsMap[env.Name]; !ok {
+					successfulEnvs = append(successfulEnvs, env.Name)
+				}
+			}
+			fmt.Println(console.Bold(fmt.Sprintf("no apis are deployed in %s: %s", s.PluralS("environment", len(successfulEnvs)), s.StrsAnd(successfulEnvs))) + "\n")
+		}
+
+		// Print the first error
+		for name, err := range errorsMap {
+			if err != nil {
+				exit.Error(errors.Wrap(err, "env "+name))
+			}
 		}
 	} else {
-		t := apiTable(allAPIs, allAPIStatuses, allMetrics, allEnvs)
-
-		if strset.New(allEnvs...).IsEqual(strset.New(types.LocalProviderType.String())) {
-			hideReplicaCountColumns(&t)
+		if len(allBatchAPIs) > 0 {
+			t := batchAPIsTable(allBatchAPIs, allBatchAPIEnvs)
+			out += t.MustFormat()
 		}
 
-		out += t.MustFormat()
+		if len(allTaskAPIs) > 0 {
+			t := taskAPIsTable(allTaskAPIs, allTaskAPIEnvs)
+			if len(allBatchAPIs) > 0 {
+				out += "\n"
+			}
+			out += t.MustFormat()
+		}
+
+		if len(allRealtimeAPIs) > 0 {
+			t := realtimeAPIsTable(allRealtimeAPIs, allRealtimeAPIEnvs)
+			if len(allBatchAPIs) > 0 || len(allTaskAPIs) > 0 {
+				out += "\n"
+			}
+			out += t.MustFormat()
+		}
+
+		if len(allTrafficSplitters) > 0 {
+			t := trafficSplitterListTable(allTrafficSplitters, allTrafficSplitterEnvs)
+
+			if len(allRealtimeAPIs) > 0 || len(allBatchAPIs) > 0 || len(allTaskAPIs) > 0 {
+				out += "\n"
+			}
+
+			out += t.MustFormat()
+		}
 	}
 
 	if len(errorsMap) == 1 {
@@ -202,405 +321,159 @@ func getAPIsInAllEnvironments() (string, error) {
 		out += fmt.Sprintf("unable to detect apis from the %s environments; run `cortex get --env ENV_NAME` if this is unexpected\n", s.StrsAnd(errors.NonNilErrorMapKeys(errorsMap)))
 	}
 
-	mismatchedAPIMessage, err := getLocalVersionMismatchedAPIsMessage()
-	if err == nil {
-		out = s.EnsureBlankLineIfNotEmpty(out)
-		out += mismatchedAPIMessage
-	}
-
 	return out, nil
 }
 
-func hideReplicaCountColumns(t *table.Table) {
-	t.FindHeaderByTitle(_titleUpToDate).Hidden = true
-	t.FindHeaderByTitle(_titleStale).Hidden = true
-	t.FindHeaderByTitle(_titleRequested).Hidden = true
-	t.FindHeaderByTitle(_titleFailed).Hidden = true
-}
-
-func getAPIs(env cliconfig.Environment, printEnv bool) (string, error) {
-	var apisRes schema.GetAPIsResponse
-	var err error
-
-	if env.Provider == types.AWSProviderType {
-		apisRes, err = cluster.GetAPIs(MustGetOperatorConfig(env.Name))
-		if err != nil {
-			return "", err
-		}
-	} else {
-		apisRes, err = local.GetAPIs()
-		if err != nil {
-			return "", err
-		}
-	}
-
-	if len(apisRes.APIs) == 0 {
-		return console.Bold("no apis are deployed"), nil
-	}
-
-	envNames := []string{}
-	for range apisRes.APIs {
-		envNames = append(envNames, env.Name)
-	}
-
-	t := apiTable(apisRes.APIs, apisRes.Statuses, apisRes.AllMetrics, envNames)
-
-	t.FindHeaderByTitle(_titleEnvironment).Hidden = true
-
-	out := t.MustFormat()
-
-	if env.Provider == types.LocalProviderType {
-		hideReplicaCountColumns(&t)
-		mismatchedVersionAPIsErrorMessage, _ := getLocalVersionMismatchedAPIsMessage()
-		if len(mismatchedVersionAPIsErrorMessage) > 0 {
-			out += "\n" + mismatchedVersionAPIsErrorMessage
-		}
-	}
-
-	return out, nil
-}
-
-func getLocalVersionMismatchedAPIsMessage() (string, error) {
-	mismatchedAPINames, err := local.ListVersionMismatchedAPIs()
+func getAPIsByEnv(env cliconfig.Environment, printEnv bool) (string, error) {
+	apisRes, err := cluster.GetAPIs(MustGetOperatorConfig(env.Name))
 	if err != nil {
 		return "", err
 	}
-	if len(mismatchedAPINames) == 0 {
-		return "", nil
-	}
 
-	if len(mismatchedAPINames) == 1 {
-		return fmt.Sprintf("an api named %s was deployed in your local environment using a different version of the cortex cli; please delete them using `cortex delete %s` and then redeploy them\n", s.UserStr(mismatchedAPINames[0]), mismatchedAPINames[0]), nil
-	}
-	return fmt.Sprintf("apis named %s were deployed in your local environment using a different version of the cortex cli; please delete them using `cortex delete API_NAME` and then redeploy them\n", s.UserStrsAnd(mismatchedAPINames)), nil
-}
-
-func getAPI(env cliconfig.Environment, apiName string) (string, error) {
-	var apiRes schema.GetAPIResponse
-	var err error
-	if env.Provider == types.AWSProviderType {
-		apiRes, err = cluster.GetAPI(MustGetOperatorConfig(env.Name), apiName)
+	if _flagOutput == flags.JSONOutputType {
+		bytes, err := libjson.Marshal(apisRes)
 		if err != nil {
-			// note: if modifying this string, search the codebase for it and change all occurrences
-			if strings.HasSuffix(errors.Message(err), "is not deployed") {
-				return console.Bold(errors.Message(err)), nil
-			}
 			return "", err
 		}
-	} else {
-		apiRes, err = local.GetAPI(apiName)
-		if err != nil {
-			// note: if modifying this string, search the codebase for it and change all occurrences
-			if strings.HasSuffix(errors.Message(err), "is not deployed") {
-				return console.Bold(errors.Message(err)), nil
-			}
-			return "", err
+		return string(bytes), nil
+	}
+
+	var allRealtimeAPIs []schema.APIResponse
+	var allBatchAPIs []schema.APIResponse
+	var allTaskAPIs []schema.APIResponse
+	var allTrafficSplitters []schema.APIResponse
+
+	for _, api := range apisRes {
+		switch api.Spec.Kind {
+		case userconfig.BatchAPIKind:
+			allBatchAPIs = append(allBatchAPIs, api)
+		case userconfig.TaskAPIKind:
+			allTaskAPIs = append(allTaskAPIs, api)
+		case userconfig.RealtimeAPIKind:
+			allRealtimeAPIs = append(allRealtimeAPIs, api)
+		case userconfig.TrafficSplitterKind:
+			allTrafficSplitters = append(allTrafficSplitters, api)
 		}
 	}
 
-	var out string
+	if len(allRealtimeAPIs) == 0 && len(allBatchAPIs) == 0 && len(allTaskAPIs) == 0 && len(allTrafficSplitters) == 0 {
+		return console.Bold("no apis are deployed"), nil
+	}
 
-	t := apiTable([]spec.API{apiRes.API}, []status.Status{apiRes.Status}, []metrics.Metrics{apiRes.Metrics}, []string{env.Name})
-	t.FindHeaderByTitle(_titleEnvironment).Hidden = true
-	t.FindHeaderByTitle(_titleAPI).Hidden = true
+	out := ""
 
-	out += t.MustFormat()
-
-	api := apiRes.API
-
-	if env.Provider != types.LocalProviderType && api.Monitoring != nil {
-		switch api.Monitoring.ModelType {
-		case userconfig.ClassificationModelType:
-			out += "\n" + classificationMetricsStr(&apiRes.Metrics)
-		case userconfig.RegressionModelType:
-			out += "\n" + regressionMetricsStr(&apiRes.Metrics)
+	if len(allBatchAPIs) > 0 {
+		envNames := []string{}
+		for range allBatchAPIs {
+			envNames = append(envNames, env.Name)
 		}
+
+		t := batchAPIsTable(allBatchAPIs, envNames)
+		t.FindHeaderByTitle(_titleEnvironment).Hidden = true
+
+		out += t.MustFormat()
 	}
 
-	apiEndpoint := apiRes.BaseURL
-	if env.Provider == types.AWSProviderType {
-		apiEndpoint = strings.Replace(urls.Join(apiRes.BaseURL, *api.Endpoint), "https://", "http://", 1)
+	if len(allTaskAPIs) > 0 {
+		envNames := []string{}
+		for range allTaskAPIs {
+			envNames = append(envNames, env.Name)
+		}
+
+		t := taskAPIsTable(allTaskAPIs, envNames)
+		t.FindHeaderByTitle(_titleEnvironment).Hidden = true
+
+		if len(allBatchAPIs) > 0 {
+			out += "\n"
+		}
+
+		out += t.MustFormat()
 	}
 
-	if apiRes.DashboardURL != "" {
-		out += "\n" + console.Bold("metrics dashboard: ") + apiRes.DashboardURL + "\n"
+	if len(allRealtimeAPIs) > 0 {
+		envNames := []string{}
+		for range allRealtimeAPIs {
+			envNames = append(envNames, env.Name)
+		}
+
+		t := realtimeAPIsTable(allRealtimeAPIs, envNames)
+		t.FindHeaderByTitle(_titleEnvironment).Hidden = true
+
+		if len(allBatchAPIs) > 0 || len(allTaskAPIs) > 0 {
+			out += "\n"
+		}
+
+		out += t.MustFormat()
 	}
 
-	out += "\n" + console.Bold("endpoint: ") + apiEndpoint
+	if len(allTrafficSplitters) > 0 {
+		envNames := []string{}
+		for range allTrafficSplitters {
+			envNames = append(envNames, env.Name)
+		}
 
-	out += fmt.Sprintf("\n%s curl %s -X POST -H \"Content-Type: application/json\" -d @sample.json\n", console.Bold("curl:"), apiEndpoint)
+		t := trafficSplitterListTable(allTrafficSplitters, envNames)
+		t.FindHeaderByTitle(_titleEnvironment).Hidden = true
 
-	if api.Predictor.Type == userconfig.TensorFlowPredictorType || api.Predictor.Type == userconfig.ONNXPredictorType {
-		out += "\n" + describeModelInput(&apiRes.Status, apiEndpoint)
+		if len(allBatchAPIs) > 0 || len(allTaskAPIs) > 0 || len(allRealtimeAPIs) > 0 {
+			out += "\n"
+		}
+
+		out += t.MustFormat()
 	}
-
-	out += titleStr("configuration") + strings.TrimSpace(api.UserStr(env.Provider))
 
 	return out, nil
 }
 
-func apiTable(apis []spec.API, statuses []status.Status, allMetrics []metrics.Metrics, envNames []string) table.Table {
-	rows := make([][]interface{}, 0, len(apis))
-
-	var totalFailed int32
-	var totalStale int32
-	var total4XX int
-	var total5XX int
-
-	for i, api := range apis {
-		metrics := allMetrics[i]
-		status := statuses[i]
-		lastUpdated := time.Unix(api.LastUpdated, 0)
-		rows = append(rows, []interface{}{
-			envNames[i],
-			api.Name,
-			status.Message(),
-			status.Updated.Ready,
-			status.Stale.Ready,
-			status.Requested,
-			status.Updated.TotalFailed(),
-			libtime.SinceStr(&lastUpdated),
-			latencyStr(&metrics),
-			code2XXStr(&metrics),
-			code4XXStr(&metrics),
-			code5XXStr(&metrics),
-		})
-
-		totalFailed += status.Updated.TotalFailed()
-		totalStale += status.Stale.Ready
-
-		if metrics.NetworkStats != nil {
-			total4XX += metrics.NetworkStats.Code4XX
-			total5XX += metrics.NetworkStats.Code5XX
-		}
-	}
-
-	return table.Table{
-		Headers: []table.Header{
-			{Title: _titleEnvironment},
-			{Title: _titleAPI},
-			{Title: _titleStatus},
-			{Title: _titleUpToDate},
-			{Title: _titleStale, Hidden: totalStale == 0},
-			{Title: _titleRequested},
-			{Title: _titleFailed, Hidden: totalFailed == 0},
-			{Title: _titleLastupdated},
-			{Title: _titleAvgRequest},
-			{Title: _title2XX},
-			{Title: _title4XX, Hidden: total4XX == 0},
-			{Title: _title5XX, Hidden: total5XX == 0},
-		},
-		Rows: rows,
-	}
-}
-
-func latencyStr(metrics *metrics.Metrics) string {
-	if metrics.NetworkStats == nil || metrics.NetworkStats.Latency == nil {
-		return "-"
-	}
-	if *metrics.NetworkStats.Latency < 1000 {
-		return fmt.Sprintf("%.6g ms", *metrics.NetworkStats.Latency)
-	}
-	return fmt.Sprintf("%.6g s", (*metrics.NetworkStats.Latency)/1000)
-}
-
-func code2XXStr(metrics *metrics.Metrics) string {
-	if metrics.NetworkStats == nil || metrics.NetworkStats.Code2XX == 0 {
-		return "-"
-	}
-	return s.Int(metrics.NetworkStats.Code2XX)
-}
-
-func code4XXStr(metrics *metrics.Metrics) string {
-	if metrics.NetworkStats == nil || metrics.NetworkStats.Code4XX == 0 {
-		return "-"
-	}
-	return s.Int(metrics.NetworkStats.Code4XX)
-}
-
-func code5XXStr(metrics *metrics.Metrics) string {
-	if metrics.NetworkStats == nil || metrics.NetworkStats.Code5XX == 0 {
-		return "-"
-	}
-	return s.Int(metrics.NetworkStats.Code5XX)
-}
-
-func regressionMetricsStr(metrics *metrics.Metrics) string {
-	minStr := "-"
-	maxStr := "-"
-	avgStr := "-"
-
-	if metrics.RegressionStats != nil {
-		if metrics.RegressionStats.Min != nil {
-			minStr = fmt.Sprintf("%.9g", *metrics.RegressionStats.Min)
-		}
-
-		if metrics.RegressionStats.Max != nil {
-			maxStr = fmt.Sprintf("%.9g", *metrics.RegressionStats.Max)
-		}
-
-		if metrics.RegressionStats.Avg != nil {
-			avgStr = fmt.Sprintf("%.9g", *metrics.RegressionStats.Avg)
-		}
-	}
-
-	t := table.Table{
-		Headers: []table.Header{
-			{Title: "min", MaxWidth: 10},
-			{Title: "max", MaxWidth: 10},
-			{Title: "avg", MaxWidth: 10},
-		},
-		Rows: [][]interface{}{{minStr, maxStr, avgStr}},
-	}
-
-	return t.MustFormat()
-}
-
-func classificationMetricsStr(metrics *metrics.Metrics) string {
-	classList := make([]string, 0, len(metrics.ClassDistribution))
-	for inputName := range metrics.ClassDistribution {
-		classList = append(classList, inputName)
-	}
-	sort.Strings(classList)
-
-	rows := make([][]interface{}, len(classList))
-	for rowNum, className := range classList {
-		rows[rowNum] = []interface{}{
-			className,
-			metrics.ClassDistribution[className],
-		}
-	}
-
-	if len(classList) == 0 {
-		rows = append(rows, []interface{}{
-			"-",
-			"-",
-		})
-	}
-
-	t := table.Table{
-		Headers: []table.Header{
-			{Title: "class", MaxWidth: 40},
-			{Title: "count", MaxWidth: 20},
-		},
-		Rows: rows,
-	}
-
-	out := t.MustFormat()
-
-	if len(classList) == consts.MaxClassesPerMonitoringRequest {
-		out += fmt.Sprintf("\nlisting at most %d classes, the complete list can be found in your cloudwatch dashboard\n", consts.MaxClassesPerMonitoringRequest)
-	}
-	return out
-}
-
-func describeModelInput(status *status.Status, apiEndpoint string) string {
-	if status.Updated.Ready+status.Stale.Ready == 0 {
-		return "the model's input schema will be available when the api is live\n"
-	}
-
-	apiSummary, err := getAPISummary(apiEndpoint)
+func getAPI(env cliconfig.Environment, apiName string) (string, error) {
+	apisRes, err := cluster.GetAPI(MustGetOperatorConfig(env.Name), apiName)
 	if err != nil {
-		return "error retrieving the model's input schema: " + errors.Message(err) + "\n"
+		return "", err
 	}
 
-	numRows := 0
-	for _, inputSignatures := range apiSummary.ModelSignatures {
-		numRows += len(inputSignatures)
-	}
-
-	usesDefaultModel := false
-	rows := make([][]interface{}, numRows)
-	rowNum := 0
-	for modelName, inputSignatures := range apiSummary.ModelSignatures {
-		for inputName, inputSignature := range inputSignatures {
-			shapeStr := make([]string, len(inputSignature.Shape))
-			for idx, dim := range inputSignature.Shape {
-				shapeStr[idx] = s.ObjFlatNoQuotes(dim)
-			}
-			rows[rowNum] = []interface{}{
-				modelName,
-				inputName,
-				inputSignature.Type,
-				"(" + strings.Join(shapeStr, ", ") + ")",
-			}
-			rowNum++
-		}
-		if modelName == consts.SingleModelName {
-			usesDefaultModel = true
-		}
-	}
-
-	inputTitle := "input"
-	if usesDefaultModel {
-		inputTitle = "model input"
-	}
-	t := table.Table{
-		Headers: []table.Header{
-			{Title: "model name", MaxWidth: 32, Hidden: usesDefaultModel},
-			{Title: inputTitle, MaxWidth: 32},
-			{Title: "type", MaxWidth: 10},
-			{Title: "shape", MaxWidth: 20},
-		},
-		Rows: rows,
-	}
-
-	return t.MustFormat()
-}
-
-func makeRequest(request *http.Request) (http.Header, []byte, error) {
-	client := http.Client{
-		Timeout: 600 * time.Second,
-		Transport: &http.Transport{
-			TLSClientConfig: &tls.Config{InsecureSkipVerify: true},
-		},
-	}
-
-	response, err := client.Do(request)
-	if err != nil {
-		return nil, nil, errors.Wrap(err, errStrFailedToConnect(*request.URL))
-	}
-	defer response.Body.Close()
-
-	if response.StatusCode != 200 {
-		bodyBytes, err := ioutil.ReadAll(response.Body)
+	if _flagOutput == flags.JSONOutputType {
+		bytes, err := libjson.Marshal(apisRes)
 		if err != nil {
-			return nil, nil, errors.Wrap(err, _errStrRead)
+			return "", err
 		}
-		return nil, nil, ErrorResponseUnknown(string(bodyBytes), response.StatusCode)
+		return string(bytes), nil
 	}
 
-	bodyBytes, err := ioutil.ReadAll(response.Body)
-	if err != nil {
-		return nil, nil, errors.Wrap(err, _errStrRead)
+	if len(apisRes) == 0 {
+		exit.Error(errors.ErrorUnexpected(fmt.Sprintf("unable to find API %s", apiName)))
 	}
-	return response.Header, bodyBytes, nil
+
+	apiRes := apisRes[0]
+
+	switch apiRes.Spec.Kind {
+	case userconfig.RealtimeAPIKind:
+		return realtimeAPITable(apiRes, env)
+	case userconfig.TrafficSplitterKind:
+		return trafficSplitterTable(apiRes, env)
+	case userconfig.BatchAPIKind:
+		return batchAPITable(apiRes), nil
+	case userconfig.TaskAPIKind:
+		return taskAPITable(apiRes), nil
+	default:
+		return "", errors.ErrorUnexpected(fmt.Sprintf("encountered unexpected kind %s for api %s", apiRes.Spec.Kind, apiRes.Spec.Name))
+	}
 }
 
-func getAPISummary(apiEndpoint string) (*schema.APISummary, error) {
-	req, err := http.NewRequest("GET", apiEndpoint, nil)
-	if err != nil {
-		return nil, errors.Wrap(err, "unable to request api summary")
-	}
-	req.Header.Set("Content-Type", "application/json")
-	_, response, err := makeRequest(req)
-	if err != nil {
-		return nil, err
+func apiHistoryTable(apiVersions []schema.APIVersion) string {
+	t := table.Table{
+		Headers: []table.Header{
+			{Title: "api id"},
+			{Title: "last deployed"},
+		},
 	}
 
-	var apiSummary schema.APISummary
-	err = json.DecodeWithNumber(response, &apiSummary)
-	if err != nil {
-		return nil, errors.Wrap(err, "unable to parse api summary response")
+	t.Rows = make([][]interface{}, len(apiVersions))
+	for i, apiVersion := range apiVersions {
+		lastUpdated := time.Unix(apiVersion.LastUpdated, 0)
+		t.Rows[i] = []interface{}{apiVersion.APIID, libtime.SinceStr(&lastUpdated)}
 	}
 
-	for _, inputSignatures := range apiSummary.ModelSignatures {
-		for _, inputSignature := range inputSignatures {
-			inputSignature.Shape = cast.JSONNumbers(inputSignature.Shape)
-		}
-	}
-
-	return &apiSummary, nil
+	return t.MustFormat(&table.Opts{Sort: pointer.Bool(false)})
 }
 
 func titleStr(title string) string {

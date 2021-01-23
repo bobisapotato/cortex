@@ -1,5 +1,5 @@
 /*
-Copyright 2020 Cortex Labs, Inc.
+Copyright 2021 Cortex Labs, Inc.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -73,6 +73,9 @@ func rerun(f func() (string, error)) {
 			nextStrSlice := strings.Split(nextStr, "\n")
 
 			terminalWidth := getTerminalWidth()
+			if terminalWidth <= 0 {
+				exit.Error(ErrorNoTerminalWidth())
+			}
 
 			nextNumLines := 0
 			for _, strLine := range nextStrSlice {
@@ -97,7 +100,7 @@ func rerun(f func() (string, error)) {
 
 			prevStrSlice = nextStrSlice
 
-			time.Sleep(time.Second)
+			time.Sleep(time.Second * 2)
 		}
 	} else {
 		str, err := f()

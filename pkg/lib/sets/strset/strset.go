@@ -1,5 +1,5 @@
 /*
-Copyright 2020 Cortex Labs, Inc.
+Copyright 2021 Cortex Labs, Inc.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -23,9 +23,6 @@ import (
 	"strings"
 )
 
-// string
-
-// Set functionality adapted from github.com/scylladb/go-set
 type Set map[string]struct{}
 
 var _keyExists = struct{}{}
@@ -60,6 +57,23 @@ func (s Set) Remove(items ...string) {
 	for _, item := range items {
 		delete(s, item)
 	}
+}
+
+// GetOne returns an item from the set or "" if the set is empty.
+func (s Set) GetOne() string {
+	for item := range s {
+		return item
+	}
+	return ""
+}
+
+// GetOne2 returns an item from the set. The second value is a bool that is
+// true if an item exists in the set, or false if the set is empty.
+func (s Set) GetOne2() (string, bool) {
+	for item := range s {
+		return item, true
+	}
+	return "", false
 }
 
 // Pop deletes and returns an item from the Set. The underlying Set s is
@@ -176,7 +190,7 @@ func (s Set) Slice() []string {
 	return v
 }
 
-// List returns a sorted slice of all items.
+// List returns a sorted slice of all items (a to z).
 func (s Set) SliceSorted() []string {
 	v := s.Slice()
 	sort.Strings(v)
@@ -249,7 +263,7 @@ func Union(sets ...Set) Set {
 	return u
 }
 
-// Difference returns a new set which contains items which are in in the first
+// Difference returns a new set which contains items which are in the first
 // set but not in the others.
 func Difference(set1 Set, sets ...Set) Set {
 	s := set1.Copy()

@@ -1,5 +1,5 @@
 /*
-Copyright 2020 Cortex Labs, Inc.
+Copyright 2021 Cortex Labs, Inc.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,7 +17,12 @@ limitations under the License.
 package spec
 
 type ProjectFiles interface {
-	GetConfigFilePath() string
-	GetAllPaths() []string
+	// Return all paths in the project, relative to the project root containing cortex.yaml
+	AllPaths() []string
+	// Return the contents of a file, given the path (relative to the project root)
 	GetFile(string) ([]byte, error)
+	// Return whether the project contains a file path (relative to the project root)
+	HasFile(string) bool
+	// Return whether the project contains a directory path (relative to the project root)
+	HasDir(string) bool
 }

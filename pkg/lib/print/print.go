@@ -1,5 +1,5 @@
 /*
-Copyright 2020 Cortex Labs, Inc.
+Copyright 2021 Cortex Labs, Inc.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -18,6 +18,7 @@ package print
 
 import (
 	"fmt"
+	"os"
 	"strings"
 
 	"github.com/cortexlabs/cortex/pkg/lib/console"
@@ -40,6 +41,21 @@ func BoldFirstLine(msg string) {
 	}
 }
 
+func StderrBoldFirstLine(msg string) {
+	msgParts := strings.Split(msg, "\n")
+
+	if len(msgParts[0]) > _maxBoldLength {
+		StderrPrintln(msg)
+		return
+	}
+
+	StderrPrintln(console.Bold(msgParts[0]))
+
+	if len(msgParts) > 1 {
+		StderrPrintln(strings.Join(msgParts[1:], "\n"))
+	}
+}
+
 func BoldFirstBlock(msg string) {
 	msgParts := strings.Split(msg, "\n\n")
 
@@ -55,7 +71,26 @@ func BoldFirstBlock(msg string) {
 	}
 }
 
+func StderrBoldFirstBlock(msg string) {
+	msgParts := strings.Split(msg, "\n\n")
+
+	if len(msgParts[0]) > _maxBoldLength {
+		StderrPrintln(msg)
+		return
+	}
+
+	StderrPrintln(console.Bold(msgParts[0]))
+
+	if len(msgParts) > 1 {
+		StderrPrintln("\n" + strings.Join(msgParts[1:], "\n\n"))
+	}
+}
+
 func Dot() error {
 	fmt.Print(".")
 	return nil
+}
+
+func StderrPrintln(str string) {
+	os.Stderr.WriteString(str + "\n")
 }

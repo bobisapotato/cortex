@@ -1,4 +1,4 @@
-# Copyright 2020 Cortex Labs, Inc.
+# Copyright 2021 Cortex Labs, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -20,7 +20,9 @@ response = ecr.describe_repositories(maxResults=1000)
 
 for repo in response["repositories"]:
     ecr.delete_repository(
-        registryId=repo["registryId"], repositoryName=repo["repositoryName"], force=True,
+        registryId=repo["registryId"],
+        repositoryName=repo["repositoryName"],
+        force=True,
     )
     print(f"deleted{repo['repositoryName']}")
 

@@ -17,11 +17,17 @@ commands:
       - run:
           name: Install Go
           command: |
-            wget https://dl.google.com/go/go1.14.2.linux-amd64.tar.gz
-            sudo tar -C /usr/local -xzf go1.14.2.linux-amd64.tar.gz
+            wget https://dl.google.com/go/go1.14.7.linux-amd64.tar.gz
+            sudo tar -C /usr/local -xzf go1.14.7.linux-amd64.tar.gz
             rm -rf go*.tar.gz
             echo 'export PATH=$PATH:/usr/local/go/bin' >> $BASH_ENV
             echo 'export PATH=$PATH:~/go/bin' >> $BASH_ENV
+  quay-login:
+    description: Log Docker agent into Quay.io
+    steps:
+      - run:
+          name: Login to Quay
+          command: docker login -u=$QUAY_USERNAME -p=$QUAY_PASSWORD quay.io
 
 jobs:
   test:
@@ -32,7 +38,7 @@ jobs:
       - setup_remote_docker
       - install-go
       - run: go get -u -v golang.org/x/lint/golint
-      - run: sudo pip install black
+      - run: sudo pip install black aiohttp
       - run:
           name: Lint
           command: make lint
@@ -45,14 +51,18 @@ jobs:
   build-and-deploy:
     docker:
       - image: circleci/python:3.6
+    environment:
+      NUM_BUILD_PROCS: "2"
     steps:
       - checkout
       - setup_remote_docker
       - install-go
+      - run: sudo apt update && sudo apt install parallel -y
+      - run: sudo pip install awscli
       - run: make ci-build-images
       - run: make ci-build-cli
       - return-if-not-deployed-branch
-      - run: sudo pip install awscli
+      - quay-login
       - run:
           command: make ci-push-images
           no_output_timeout: 20m

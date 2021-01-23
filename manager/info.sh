@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Copyright 2020 Cortex Labs, Inc.
+# Copyright 2021 Cortex Labs, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -14,15 +14,15 @@
 # See the License for the specific language governing permissions and
 # limitations under the License.
 
-set -e
+set -eo pipefail
+
+CORTEX_VERSION_MINOR=master
 
 function get_operator_endpoint() {
-  set -eo pipefail
   kubectl -n=istio-system get service ingressgateway-operator -o json | tr -d '[:space:]' | sed 's/.*{\"hostname\":\"\(.*\)\".*/\1/'
 }
 
-function get_apis_endpoint() {
-  set -eo pipefail
+function get_api_load_balancer_endpoint() {
   kubectl -n=istio-system get service ingressgateway-apis -o json | tr -d '[:space:]' | sed 's/.*{\"hostname\":\"\(.*\)\".*/\1/'
 }
 
@@ -31,11 +31,12 @@ if ! eksctl utils describe-stacks --cluster=$CORTEX_CLUSTER_NAME --region=$CORTE
   exit 1
 fi
 
-eksctl utils write-kubeconfig --cluster=$CORTEX_CLUSTER_NAME --region=$CORTEX_REGION | grep -v "saved kubeconfig as" | grep -v "using region" | grep -v "eksctl version" || true
+eksctl utils write-kubeconfig --cluster=$CORTEX_CLUSTER_NAME --region=$CORTEX_REGION | (grep -v "saved kubeconfig as" | grep -v "using region" | grep -v "eksctl version" || true)
+out=$(kubectl get pods 2>&1 || true); if [[ "$out" == *"must be logged in to the server"* ]]; then echo "error: your aws iam user does not have access to this cluster; to grant access, see https://docs.cortex.dev/v/${CORTEX_VERSION_MINOR}/"; exit 1; fi
 
 operator_endpoint=$(get_operator_endpoint)
-apis_endpoint=$(get_apis_endpoint)
+api_load_balancer_endpoint=$(get_api_load_balancer_endpoint)
 
-# before modifying this, search for this prefix
-echo "operator endpoint: $operator_endpoint"
-echo "apis endpoint:     $apis_endpoint"
+echo -e "\033[1mendpoints:\033[0m"
+echo "operator:          $operator_endpoint"  # before modifying this, search for this prefix
+echo "api load balancer: $api_load_balancer_endpoint"

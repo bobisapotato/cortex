@@ -1,5 +1,5 @@
 /*
-Copyright 2020 Cortex Labs, Inc.
+Copyright 2021 Cortex Labs, Inc.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -31,23 +31,28 @@ var (
 
 	DefaultImagePythonPredictorCPU   = defaultDockerImage("python-predictor-cpu")
 	DefaultImagePythonPredictorGPU   = defaultDockerImage("python-predictor-gpu")
+	DefaultImagePythonPredictorInf   = defaultDockerImage("python-predictor-inf")
 	DefaultImageTensorFlowServingCPU = defaultDockerImage("tensorflow-serving-cpu")
 	DefaultImageTensorFlowServingGPU = defaultDockerImage("tensorflow-serving-gpu")
+	DefaultImageTensorFlowServingInf = defaultDockerImage("tensorflow-serving-inf")
 	DefaultImageTensorFlowPredictor  = defaultDockerImage("tensorflow-predictor")
 	DefaultImageONNXPredictorCPU     = defaultDockerImage("onnx-predictor-cpu")
 	DefaultImageONNXPredictorGPU     = defaultDockerImage("onnx-predictor-gpu")
 	DefaultImagePathsSet             = strset.New(
 		DefaultImagePythonPredictorCPU,
 		DefaultImagePythonPredictorGPU,
+		DefaultImagePythonPredictorInf,
 		DefaultImageTensorFlowServingCPU,
 		DefaultImageTensorFlowServingGPU,
+		DefaultImageTensorFlowServingInf,
 		DefaultImageTensorFlowPredictor,
 		DefaultImageONNXPredictorCPU,
 		DefaultImageONNXPredictorGPU,
 	)
 
-	MaxClassesPerMonitoringRequest = 20 // cloudwatch.GeMetricData can get up to 100 metrics per request, avoid multiple requests and have room for other stats
-	DashboardTitle                 = "# cortex monitoring dashboard"
+	DashboardTitle               = "# cortex monitoring dashboard"
+	DefaultMaxReplicaConcurrency = int64(1024)
+	NeuronCoresPerInf            = int64(4)
 )
 
 func defaultDockerImage(imageName string) string {
@@ -56,5 +61,5 @@ func defaultDockerImage(imageName string) string {
 		return fmt.Sprintf("%s/%s:latest", imageOverride, imageName)
 	}
 
-	return fmt.Sprintf("cortexlabs/%s:%s", imageName, CortexVersion)
+	return fmt.Sprintf("quay.io/cortexlabs/%s:%s", imageName, CortexVersion)
 }

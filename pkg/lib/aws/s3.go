@@ -1,5 +1,5 @@
 /*
-Copyright 2020 Cortex Labs, Inc.
+Copyright 2021 Cortex Labs, Inc.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"crypto/md5"
 	"encoding/hex"
+	"fmt"
 	"io"
 	"path/filepath"
 	"strings"
@@ -36,6 +37,7 @@ import (
 	"github.com/cortexlabs/cortex/pkg/lib/msgpack"
 	"github.com/cortexlabs/cortex/pkg/lib/pointer"
 	"github.com/cortexlabs/cortex/pkg/lib/sets/strset"
+	"github.com/cortexlabs/cortex/pkg/lib/slices"
 	s "github.com/cortexlabs/cortex/pkg/lib/strings"
 )
 
@@ -76,6 +78,9 @@ func SplitS3Path(s3Path string) (string, string, error) {
 	}
 	fullPath := s3Path[len("s3://"):]
 	slashIndex := strings.Index(fullPath, "/")
+	if slashIndex == -1 {
+		return fullPath, "", nil
+	}
 	bucket := fullPath[0:slashIndex]
 	key := fullPath[slashIndex+1:]
 
@@ -99,10 +104,10 @@ func IsValidS3Path(s3Path string) bool {
 		return false
 	}
 	parts := strings.Split(s3Path[5:], "/")
-	if len(parts) < 2 {
+	if len(parts) == 0 {
 		return false
 	}
-	if parts[0] == "" || parts[1] == "" {
+	if parts[0] == "" {
 		return false
 	}
 	return true
@@ -120,6 +125,45 @@ func IsValidS3aPath(s3aPath string) bool {
 		return false
 	}
 	return true
+}
+
+// List all S3 objects that are "depth" levels or deeper than the given "s3Path".
+// Setting depth to 1 effectively translates to listing the objects one level or deeper than the given prefix (aka listing the directory contents).
+//
+// 1st returned value is the list of paths found at level <depth> or deeper.
+// 2nd returned value is the list of paths found at all levels.
+func (c *Client) GetNLevelsDeepFromS3Path(s3Path string, depth int, includeDirObjects bool, maxResults *int64) ([]string, []string, error) {
+	paths := strset.New()
+
+	_, key, err := SplitS3Path(s3Path)
+	if err != nil {
+		return nil, nil, err
+	}
+
+	allS3Objects, err := c.ListS3PathDir(s3Path, includeDirObjects, maxResults)
+	if err != nil {
+		return nil, nil, err
+	}
+	allPaths := ConvertS3ObjectsToKeys(allS3Objects...)
+
+	keySplit := slices.RemoveEmpties(strings.Split(key, "/"))
+	for _, path := range allPaths {
+		pathSplit := slices.RemoveEmpties(strings.Split(path, "/"))
+		if len(pathSplit)-len(keySplit) >= depth {
+			computedPath := strings.Join(pathSplit[:len(keySplit)+depth], "/")
+			paths.Add(computedPath)
+		}
+	}
+
+	return paths.Slice(), allPaths, nil
+}
+
+func ConvertS3ObjectsToKeys(s3Objects ...*s3.Object) []string {
+	paths := make([]string, 0, len(s3Objects))
+	for _, object := range s3Objects {
+		paths = append(paths, *object.Key)
+	}
+	return paths
 }
 
 func GetBucketRegionFromS3Path(s3Path string) (string, error) {
@@ -432,6 +476,15 @@ func (c *Client) ReadBytesFromS3Path(s3Path string) ([]byte, error) {
 	return c.ReadBytesFromS3(bucket, key)
 }
 
+func (c *Client) ReadMsgpackFromS3Path(objPtr interface{}, s3Path string) error {
+	bucket, key, err := SplitS3Path(s3Path)
+	if err != nil {
+		return err
+	}
+
+	return c.ReadMsgpackFromS3(objPtr, bucket, key)
+}
+
 // overwrites existing file
 func (c *Client) DownloadFileFromS3(bucket string, key string, localPath string) error {
 	file, err := files.Create(localPath)
@@ -534,6 +587,46 @@ func (c *Client) DownloadPrefixFromS3(bucket string, prefix string, localDirPath
 	return nil
 }
 
+func (c *Client) S3FileIterator(bucket string, s3Obj *s3.Object, partSize int, fn func(buffer io.ReadCloser, isLastPart bool) (bool, error)) error {
+	size := int(*s3Obj.Size)
+
+	iters := size / partSize
+	if size%partSize != 0 {
+		iters++
+	}
+
+	for i := 0; i < iters; i++ {
+		min := i * (partSize)
+		max := (i + 1) * (partSize)
+		if max > size {
+			max = size
+		}
+		max--
+
+		byteRange := fmt.Sprintf("bytes=%d-%d", min, max)
+		obj, err := c.S3().GetObject(&s3.GetObjectInput{
+			Bucket: aws.String(bucket),
+			Key:    s3Obj.Key,
+			Range:  aws.String(byteRange), // use range instead of part numbers because only files uploaded using multipart have parts
+		})
+		if err != nil {
+			return errors.Wrap(err, S3Path(bucket, *s3Obj.Key), "range "+byteRange)
+		}
+
+		isLastChunk := i+1 == iters
+		shouldContinue, err := fn(obj.Body, isLastChunk)
+		if err != nil {
+			return errors.Wrap(err, S3Path(bucket, *s3Obj.Key))
+		}
+
+		if !shouldContinue {
+			break
+		}
+	}
+
+	return nil
+}
+
 func (c *Client) ListS3Dir(bucket string, s3Dir string, includeDirObjects bool, maxResults *int64) ([]*s3.Object, error) {
 	prefix := s.EnsureSuffix(s3Dir, "/")
 	return c.ListS3Prefix(bucket, prefix, includeDirObjects, maxResults)
@@ -542,6 +635,31 @@ func (c *Client) ListS3Dir(bucket string, s3Dir string, includeDirObjects bool, 
 func (c *Client) ListS3PathDir(s3DirPath string, includeDirObjects bool, maxResults *int64) ([]*s3.Object, error) {
 	s3Path := s.EnsureSuffix(s3DirPath, "/")
 	return c.ListS3PathPrefix(s3Path, includeDirObjects, maxResults)
+}
+
+// This behaves like you'd expect `ls` to behave on a local file system
+// "directory" names will be returned even if S3 directory objects don't exist
+func (c *Client) ListS3DirOneLevel(bucket string, s3Dir string, maxResults *int64) ([]string, error) {
+	s3Dir = s.EnsureSuffix(s3Dir, "/")
+
+	allNames := strset.New()
+
+	err := c.S3Iterator(bucket, s3Dir, true, nil, func(object *s3.Object) (bool, error) {
+		relativePath := strings.TrimPrefix(*object.Key, s3Dir)
+		oneLevelPath := strings.Split(relativePath, "/")[0]
+		allNames.Add(oneLevelPath)
+
+		if maxResults != nil && int64(len(allNames)) >= *maxResults {
+			return false, nil
+		}
+		return true, nil
+	})
+
+	if err != nil {
+		return nil, errors.Wrap(err, S3Path(bucket, s3Dir))
+	}
+
+	return allNames.SliceSorted(), nil
 }
 
 func (c *Client) ListS3Prefix(bucket string, prefix string, includeDirObjects bool, maxResults *int64) ([]*s3.Object, error) {
@@ -565,6 +683,20 @@ func (c *Client) ListS3PathPrefix(s3Path string, includeDirObjects bool, maxResu
 		return nil, err
 	}
 	return c.ListS3Prefix(bucket, prefix, includeDirObjects, maxResults)
+}
+
+func (c *Client) DeleteS3File(bucket string, key string) error {
+	_, err := c.S3().DeleteObject(
+		&s3.DeleteObjectInput{
+			Bucket: aws.String(bucket),
+			Key:    aws.String(key),
+		},
+	)
+
+	if err != nil {
+		return errors.WithStack(err)
+	}
+	return nil
 }
 
 func (c *Client) DeleteS3Dir(bucket string, s3Dir string, continueIfFailure bool) error {
@@ -676,6 +808,10 @@ func (c *Client) S3BatchIterator(bucket string, prefix string, includeDirObjects
 					}
 				}
 				objects = filtered
+			}
+
+			if len(objects) == 0 {
+				return true
 			}
 
 			shouldContinue, newSubErr := fn(objects)

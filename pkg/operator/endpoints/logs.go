@@ -1,5 +1,5 @@
 /*
-Copyright 2020 Cortex Labs, Inc.
+Copyright 2021 Cortex Labs, Inc.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -20,21 +20,37 @@ import (
 	"net/http"
 
 	"github.com/cortexlabs/cortex/pkg/operator/operator"
+	"github.com/cortexlabs/cortex/pkg/operator/resources"
+	"github.com/cortexlabs/cortex/pkg/types/userconfig"
 	"github.com/gorilla/mux"
 	"github.com/gorilla/websocket"
 )
 
 func ReadLogs(w http.ResponseWriter, r *http.Request) {
 	apiName := mux.Vars(r)["apiName"]
+	jobID := getOptionalQParam("jobID", r)
 
-	isDeployed, err := operator.IsAPIDeployed(apiName)
+	if jobID != "" {
+		ReadJobLogs(w, r)
+		return
+	}
+
+	deployedResource, err := resources.GetDeployedResourceByName(apiName)
 	if err != nil {
 		respondError(w, r, err)
 		return
-	} else if !isDeployed {
-		respondError(w, r, operator.ErrorAPINotDeployed(apiName))
+	}
+
+	if deployedResource.Kind == userconfig.BatchAPIKind || deployedResource.Kind == userconfig.TaskAPIKind {
+		respondError(w, r, ErrorLogsJobIDRequired(*deployedResource))
+		return
+	} else if deployedResource.Kind != userconfig.RealtimeAPIKind {
+		respondError(w, r, resources.ErrorOperationIsOnlySupportedForKind(*deployedResource, userconfig.RealtimeAPIKind))
 		return
 	}
+
+	deploymentID := deployedResource.VirtualService.Labels["deploymentID"]
+	predictorID := deployedResource.VirtualService.Labels["predictorID"]
 
 	upgrader := websocket.Upgrader{}
 	socket, err := upgrader.Upgrade(w, r, nil)
@@ -44,5 +60,5 @@ func ReadLogs(w http.ResponseWriter, r *http.Request) {
 	}
 	defer socket.Close()
 
-	operator.ReadLogs(apiName, socket)
+	operator.StreamLogsFromRandomPod(map[string]string{"apiName": apiName, "deploymentID": deploymentID, "predictorID": predictorID}, socket)
 }

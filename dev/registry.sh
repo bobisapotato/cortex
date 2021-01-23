@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Copyright 2020 Cortex Labs, Inc.
+# Copyright 2021 Cortex Labs, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -15,24 +15,35 @@
 # limitations under the License.
 
 
-set -euo pipefail
+set -eo pipefail
 
 ROOT="$(cd "$(dirname "${BASH_SOURCE[0]}")"/.. >/dev/null && pwd)"
 
-source $ROOT/dev/config/build.sh
+source $ROOT/build/images.sh
 source $ROOT/dev/util.sh
 
-flag_include_slim="false"
-flag_skip_push="false"
+if [ -f "$ROOT/dev/config/env.sh" ]; then
+  source $ROOT/dev/config/env.sh
+fi
+
+GCR_HOST=${GCR_HOST:-"gcr.io"}
+GCP_PROJECT_ID=${GCP_PROJECT_ID:-}
+AWS_ACCOUNT_ID=${AWS_ACCOUNT_ID:-}
+AWS_REGION=${AWS_REGION:-}
+
+provider="undefined"
+include_slim="false"
+positional_args=()
 while [[ $# -gt 0 ]]; do
   key="$1"
   case $key in
-    --include-slim)
-    flag_include_slim="true"
+    -p|--provider)
+    provider="$2"
+    shift
     shift
     ;;
-    --skip-push)
-    flag_skip_push="true"
+    --include-slim)
+    include_slim="true"
     shift
     ;;
     *)
@@ -42,74 +53,88 @@ while [[ $# -gt 0 ]]; do
   esac
 done
 set -- "${positional_args[@]}"
+positional_args=()
+for i in "$@"; do
+  case $i in
+    -p=*|--provider=*)
+    provider="${i#*=}"
+    shift
+    ;;
+    *)
+    positional_args+=("$1")
+    shift
+    ;;
+  esac
+done
+set -- "${positional_args[@]}"
+for arg in "$@"; do
+  if [[ "$arg" == -* ]]; then
+    echo "unknown flag: $arg"
+    exit 1
+  fi
+done
 
 cmd=${1:-""}
 sub_cmd=${2:-""}
 
-ecr_logged_in=false
+registry_push_url=""
+if [ "$provider" = "aws" ]; then
+  registry_push_url="$AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com"
+elif [ "$provider" = "gcp" ]; then
+  registry_push_url="$GCR_HOST/$GCP_PROJECT_ID"
+fi
 
-function ecr_login() {
-  if [ "$ecr_logged_in" = false ]; then
-    blue_echo "Logging in to ECR..."
-    ecr_login_command=$(aws ecr get-login --no-include-email --region $REGISTRY_REGION)
-    eval $ecr_login_command
-    ecr_logged_in=true
+is_registry_logged_in="false"
+
+function registry_login() {
+  if [ "$is_registry_logged_in" = "false" ]; then
+    if [ "$provider" = "aws" ]; then
+      blue_echo "Logging in to ECR..."
+      aws ecr get-login-password --region $AWS_REGION | docker login --username AWS --password-stdin $registry_push_url
+      aws ecr get-login-password --region us-west-2 | docker login --username AWS --password-stdin 790709498068.dkr.ecr.us-west-2.amazonaws.com  # this is for the inferentia device plugin image
+    elif [ "$provider" = "gcp" ]; then
+      blue_echo "Logging in to GCS..."
+      gcloud auth configure-docker $GCR_HOST
+    fi
+    is_registry_logged_in="true"
     green_echo "Success\n"
   fi
 }
 
-function create_registry() {
-  aws ecr create-repository --repository-name=cortexlabs/python-predictor-cpu --region=$REGISTRY_REGION || true
-  aws ecr create-repository --repository-name=cortexlabs/python-predictor-cpu-slim --region=$REGISTRY_REGION || true
-  aws ecr create-repository --repository-name=cortexlabs/python-predictor-gpu --region=$REGISTRY_REGION || true
-  aws ecr create-repository --repository-name=cortexlabs/python-predictor-gpu-slim --region=$REGISTRY_REGION || true
-  aws ecr create-repository --repository-name=cortexlabs/tensorflow-serving-cpu --region=$REGISTRY_REGION || true
-  aws ecr create-repository --repository-name=cortexlabs/tensorflow-serving-gpu --region=$REGISTRY_REGION || true
-  aws ecr create-repository --repository-name=cortexlabs/tensorflow-predictor --region=$REGISTRY_REGION || true
-  aws ecr create-repository --repository-name=cortexlabs/tensorflow-predictor-slim --region=$REGISTRY_REGION || true
-  aws ecr create-repository --repository-name=cortexlabs/onnx-predictor-cpu --region=$REGISTRY_REGION || true
-  aws ecr create-repository --repository-name=cortexlabs/onnx-predictor-cpu-slim --region=$REGISTRY_REGION || true
-  aws ecr create-repository --repository-name=cortexlabs/onnx-predictor-gpu --region=$REGISTRY_REGION || true
-  aws ecr create-repository --repository-name=cortexlabs/onnx-predictor-gpu-slim --region=$REGISTRY_REGION || true
-  aws ecr create-repository --repository-name=cortexlabs/operator --region=$REGISTRY_REGION || true
-  aws ecr create-repository --repository-name=cortexlabs/manager --region=$REGISTRY_REGION || true
-  aws ecr create-repository --repository-name=cortexlabs/downloader --region=$REGISTRY_REGION || true
-  aws ecr create-repository --repository-name=cortexlabs/cluster-autoscaler --region=$REGISTRY_REGION || true
-  aws ecr create-repository --repository-name=cortexlabs/metrics-server --region=$REGISTRY_REGION || true
-  aws ecr create-repository --repository-name=cortexlabs/nvidia --region=$REGISTRY_REGION || true
-  aws ecr create-repository --repository-name=cortexlabs/fluentd --region=$REGISTRY_REGION || true
-  aws ecr create-repository --repository-name=cortexlabs/statsd --region=$REGISTRY_REGION || true
-  aws ecr create-repository --repository-name=cortexlabs/istio-proxy --region=$REGISTRY_REGION || true
-  aws ecr create-repository --repository-name=cortexlabs/istio-pilot --region=$REGISTRY_REGION || true
-  aws ecr create-repository --repository-name=cortexlabs/istio-citadel --region=$REGISTRY_REGION || true
-  aws ecr create-repository --repository-name=cortexlabs/istio-galley --region=$REGISTRY_REGION || true
-  aws ecr create-repository --repository-name=cortexlabs/request-monitor --region=$REGISTRY_REGION || true
+function create_aws_registry() {
+  for image in "${aws_images[@]}"; do
+    aws ecr create-repository --repository-name=cortexlabs/$image --region=$AWS_REGION || true
+  done
 }
 
 ### HELPERS ###
 
 function build() {
-  local dir=$1
-  local image=$2
-  local tag=$3
+  local image=$1
+  local tag=$2
+  local dir="${ROOT}/images/${image/-slim}"
+
+  build_args=""
+  if [[ "$image" == *"-slim" ]]; then
+    build_args="--build-arg SLIM=true"
+  fi
+
+  tag_args=""
+  if [ -n "$GCP_PROJECT_ID" ]; then
+    tag_args+=" -t $GCR_HOST/$GCP_PROJECT_ID/cortexlabs/$image:$tag"
+  fi
+  if [ -n "$AWS_ACCOUNT_ID" ] && [ -n "$AWS_REGION" ]; then
+    tag_args+=" -t $AWS_ACCOUNT_ID.dkr.ecr.$AWS_REGION.amazonaws.com/cortexlabs/$image:$tag"
+  fi
 
   blue_echo "Building $image:$tag..."
-  docker build $ROOT -f $dir/Dockerfile -t cortexlabs/$image:$tag -t $REGISTRY_URL/cortexlabs/$image:$tag "${@:4}"
+  docker build $ROOT -f $dir/Dockerfile -t cortexlabs/$image:$tag $tag_args $build_args
   green_echo "Built $image:$tag\n"
 }
 
-function build_base() {
-  local dir=$1
-  local image=$2
-
-  blue_echo "Building $image..."
-  docker build $ROOT -f $dir/Dockerfile -t cortexlabs/$image:latest
-  green_echo "Built $image\n"
-}
-
 function cache_builder() {
-  local dir=$1
-  local image=$2
+  local image=$1
+  local dir="${ROOT}/images/${image/-slim}"
 
   blue_echo "Building $image-builder..."
   docker build $ROOT -f $dir/Dockerfile -t cortexlabs/$image-builder:latest --target builder
@@ -117,41 +142,28 @@ function cache_builder() {
 }
 
 function push() {
-  if [ "$flag_skip_push" == "true" ]; then
+  if [ "$provider" == "undefined" ]; then
     return
   fi
 
-  ecr_login
+  registry_login
 
   local image=$1
   local tag=$2
 
   blue_echo "Pushing $image:$tag..."
-  docker push $REGISTRY_URL/cortexlabs/$image:$tag
+  docker push $registry_push_url/cortexlabs/$image:$tag
   green_echo "Pushed $image:$tag\n"
 }
 
 function build_and_push() {
-  local dir=$1
-  local image=$2
-  local tag=$3
+  local image=$1
+  local tag=$2
 
-  build $dir $image $tag
+  set -euo pipefail  # necessary since this is called in a new shell by parallel
+
+  build $image $tag
   push $image $tag
-}
-
-function build_and_push_slim() {
-  local dir=$1
-  local image=$2
-  local tag=$3
-
-  build $dir $image $tag
-  push $image $tag
-
-  if [ "$flag_include_slim" == "true" ]; then
-    build $dir "${image}-slim" $tag --build-arg SLIM=true
-    push ${image}-slim $tag
-  fi
 }
 
 function cleanup_local() {
@@ -176,48 +188,118 @@ function cleanup_ecr() {
   done
 }
 
+function validate_env() {
+  local provider=$1
+
+  if [ "$provider" = "aws" ]; then
+    if [ -z ${AWS_REGION} ] || [ -z ${AWS_ACCOUNT_ID} ]; then
+      echo "error: environment variables AWS_REGION and AWS_ACCOUNT_ID should be exported in dev/config/env.sh"
+      exit 1
+    fi
+  elif [ "$provider" = "gcp" ]; then
+    if [ -z ${GCP_PROJECT_ID} ]; then
+      echo "error: environment variables GCP_PROJECT_ID should be exported in dev/config/env.sh"
+      exit 1
+    fi
+  fi
+}
+
+# export functions for parallel command
+export -f build_and_push
+export -f push
+export -f build
+export -f blue_echo
+export -f green_echo
+export -f registry_login
+
+# validate environment is correctly set on env.sh
+validate_env "$provider"
+
+# usage: registry.sh clean --provider aws|gcp
 if [ "$cmd" = "clean" ]; then
-  cleanup_local
-  cleanup_ecr
+  if [ "$provider" = "aws" ]; then
+    cleanup_ecr
+  fi
 
+# usage: registry.sh create --provider/-p aws|gcp
 elif [ "$cmd" = "create" ]; then
-  create_registry
+  if [ "$provider" = "aws" ]; then
+    create_aws_registry
+  fi
 
-elif [ "$cmd" = "update-manager-local" ]; then
-  build $ROOT/images/manager manager latest
+# usage: registry.sh update-single IMAGE --provider/-p aws|gcp
+elif [ "$cmd" = "update-single" ]; then
+  image=$sub_cmd
+  if [ "$image" = "operator" ] || [ "$image" = "request-monitor" ]; then
+    cache_builder $image
+  fi
+  build_and_push $image latest
 
-# usage: registry.sh update all|dev|api [--include-slim] [--skip-push]
+# usage: registry.sh update all|dev|api --provider/-p aws|gcp [--include-slim]
+# if parallel utility is installed, the docker build commands will be parallelized
 elif [ "$cmd" = "update" ]; then
+  images_to_build=()
+
   if [ "$sub_cmd" == "all" ]; then
-    build_and_push $ROOT/images/tensorflow-serving-cpu tensorflow-serving-cpu latest
-    build_and_push $ROOT/images/tensorflow-serving-gpu tensorflow-serving-gpu latest
-
-    cache_builder $ROOT/images/operator operator
-    build_and_push $ROOT/images/operator operator latest
-
-    build_and_push $ROOT/images/cluster-autoscaler cluster-autoscaler latest
-    build_and_push $ROOT/images/metrics-server metrics-server latest
-    build_and_push $ROOT/images/nvidia nvidia latest
-    build_and_push $ROOT/images/fluentd fluentd latest
-    build_and_push $ROOT/images/statsd statsd latest
-    build_and_push $ROOT/images/istio-proxy istio-proxy latest
-    build_and_push $ROOT/images/istio-pilot istio-pilot latest
-    build_and_push $ROOT/images/istio-citadel istio-citadel latest
-    build_and_push $ROOT/images/istio-galley istio-galley latest
+    images_to_build+=( "${non_dev_images_cluster[@]}" )
+    if [ "$provider" == "aws" ]; then
+      images_to_build+=( "${non_dev_images_aws[@]}" )
+    elif [ "$provider" == "gcp" ]; then
+      images_to_build+=( "${non_dev_images_gcp[@]}" )
+    elif [ "$provider" == "undefined" ]; then
+      images_to_build+=( "${non_dev_images_aws[@]}" "${non_dev_images_gcp[@]}" )
+    fi
   fi
 
   if [[ "$sub_cmd" == "all" || "$sub_cmd" == "dev" ]]; then
-    cache_builder $ROOT/images/request-monitor request-monitor
-    build_and_push $ROOT/images/request-monitor request-monitor latest
-    build_and_push $ROOT/images/manager manager latest
-    build_and_push $ROOT/images/downloader downloader latest
+    images_to_build+=( "${dev_images_cluster[@]}" )
+    if [ "$provider" == "aws" ]; then
+      images_to_build+=( "${dev_images_aws[@]}" )
+    elif [ "$provider" == "gcp" ]; then
+      images_to_build+=( "${dev_images_gcp[@]}" )
+    elif [ "$provider" == "undefined" ]; then
+      images_to_build+=( "${dev_images_aws[@]}" "${dev_images_aws[@]}" )
+    fi
   fi
 
-  build_and_push_slim $ROOT/images/python-predictor-cpu python-predictor-cpu latest
-  build_and_push_slim $ROOT/images/python-predictor-gpu python-predictor-gpu latest
-  build_and_push_slim $ROOT/images/tensorflow-predictor tensorflow-predictor latest
-  build_and_push_slim $ROOT/images/onnx-predictor-cpu onnx-predictor-cpu latest
-  build_and_push_slim $ROOT/images/onnx-predictor-gpu onnx-predictor-gpu latest
+  images_to_build+=( "${api_images_cluster[@]}" )
+  if [ "$provider" == "aws" ]; then
+    images_to_build+=( "${api_images_aws[@]}" )
+  elif [ "$provider" == "gcp" ]; then
+    images_to_build+=( "${api_images_gcp[@]}" )
+  elif [ "$provider" == "undefined" ]; then
+    images_to_build+=( "${api_images_aws[@]}" "${api_images_gcp[@]}" )
+  fi
+
+  if [ "$include_slim" == "true" ]; then
+    images_to_build+=( "${api_slim_images_cluster[@]}" )
+    if [ "$provider" == "aws" ]; then
+      images_to_build+=( "${api_slim_images_aws[@]}" )
+    elif [ "$provider" == "gcp" ]; then
+      images_to_build+=( "${api_slim_images_gcp[@]}" )
+    elif [ "$provider" == "undefined" ]; then
+      images_to_build+=( "${api_slim_images_aws[@]}" "${api_slim_images_gcp[@]}" )
+    fi
+  fi
+
+  if [[ " ${images_to_build[@]} " =~ " operator " ]]; then
+    cache_builder operator
+  fi
+  if [[ " ${images_to_build[@]} " =~ " request-monitor " ]]; then
+    cache_builder request-monitor
+  fi
+
+  if command -v parallel &> /dev/null && [ -n "${NUM_BUILD_PROCS+set}" ] && [ "$NUM_BUILD_PROCS" != "1" ]; then
+    provider=$provider is_registry_logged_in=$is_registry_logged_in ROOT=$ROOT registry_push_url=$registry_push_url SHELL=$(type -p /bin/bash) parallel --will-cite --halt now,fail=1 --eta --jobs $NUM_BUILD_PROCS build_and_push "{} latest" ::: "${images_to_build[@]}"
+  else
+    for image in "${images_to_build[@]}"; do
+      build_and_push $image latest
+    done
+  fi
 
   cleanup_local
+
+else
+  echo "unknown command: $cmd"
+  exit 1
 fi

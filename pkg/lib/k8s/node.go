@@ -1,5 +1,5 @@
 /*
-Copyright 2020 Cortex Labs, Inc.
+Copyright 2021 Cortex Labs, Inc.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,6 +17,8 @@ limitations under the License.
 package k8s
 
 import (
+	"context"
+
 	"github.com/cortexlabs/cortex/pkg/lib/errors"
 	kcore "k8s.io/api/core/v1"
 	kmeta "k8s.io/apimachinery/pkg/apis/meta/v1"
@@ -32,7 +34,7 @@ func (c *Client) ListNodes(opts *kmeta.ListOptions) ([]kcore.Node, error) {
 	if opts == nil {
 		opts = &kmeta.ListOptions{}
 	}
-	nodeList, err := c.nodeClient.List(*opts)
+	nodeList, err := c.nodeClient.List(context.Background(), *opts)
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}

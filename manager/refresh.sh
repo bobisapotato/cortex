@@ -1,6 +1,6 @@
 #!/bin/bash
 
-# Copyright 2020 Cortex Labs, Inc.
+# Copyright 2021 Cortex Labs, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -16,15 +16,18 @@
 
 set -e
 
+CORTEX_VERSION_MINOR=master
 
-cached_cluster_config_file="$1"
+cluster_config_out_path="$1"
+mkdir -p "$(dirname "$cluster_config_out_path")"
 
 if ! eksctl utils describe-stacks --cluster=$CORTEX_CLUSTER_NAME --region=$CORTEX_REGION >/dev/null 2>&1; then
   echo "error: there is no cluster named \"$CORTEX_CLUSTER_NAME\" in $CORTEX_REGION; please update your configuration to point to an existing cortex cluster or create a cortex cluster with \`cortex cluster up\`"
   exit 1
 fi
 
-eksctl utils write-kubeconfig --cluster=$CORTEX_CLUSTER_NAME --region=$CORTEX_REGION | grep -v "saved kubeconfig as" | grep -v "using region" | grep -v "eksctl version" || true
+eksctl utils write-kubeconfig --cluster=$CORTEX_CLUSTER_NAME --region=$CORTEX_REGION | (grep -v "saved kubeconfig as" | grep -v "using region" | grep -v "eksctl version" || true)
+out=$(kubectl get pods 2>&1 || true); if [[ "$out" == *"must be logged in to the server"* ]]; then echo "error: your aws iam user does not have access to this cluster; to grant access, see https://docs.cortex.dev/v/${CORTEX_VERSION_MINOR}/"; exit 1; fi
 
 kubectl get -n=default configmap cluster-config -o yaml >> cluster_configmap.yaml
 python refresh_cluster_config.py cluster_configmap.yaml tmp_cluster_config.yaml
@@ -33,4 +36,4 @@ kubectl -n=default create configmap 'cluster-config' \
     --from-file='cluster.yaml'=tmp_cluster_config.yaml \
     -o yaml --dry-run=client | kubectl apply -f - >/dev/null
 
-cat tmp_cluster_config.yaml > $cached_cluster_config_file
+cp tmp_cluster_config.yaml $cluster_config_out_path

@@ -1,5 +1,5 @@
 /*
-Copyright 2020 Cortex Labs, Inc.
+Copyright 2021 Cortex Labs, Inc.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,16 +17,18 @@ limitations under the License.
 package cluster
 
 import (
+	"path/filepath"
+
 	"github.com/cortexlabs/cortex/pkg/lib/errors"
 	"github.com/cortexlabs/cortex/pkg/lib/json"
 	s "github.com/cortexlabs/cortex/pkg/lib/strings"
 	"github.com/cortexlabs/cortex/pkg/operator/schema"
 )
 
-func Deploy(operatorConfig OperatorConfig, configPath string, deploymentBytesMap map[string][]byte, force bool) (schema.DeployResponse, error) {
+func Deploy(operatorConfig OperatorConfig, configPath string, deploymentBytesMap map[string][]byte, force bool) ([]schema.DeployResult, error) {
 	params := map[string]string{
-		"force":      s.Bool(force),
-		"configPath": configPath,
+		"force":          s.Bool(force),
+		"configFileName": filepath.Base(configPath),
 	}
 	uploadInput := &HTTPUploadInput{
 		Bytes: deploymentBytesMap,
@@ -34,13 +36,13 @@ func Deploy(operatorConfig OperatorConfig, configPath string, deploymentBytesMap
 
 	response, err := HTTPUpload(operatorConfig, "/deploy", uploadInput, params)
 	if err != nil {
-		return schema.DeployResponse{}, err
+		return nil, err
 	}
 
-	var deployResponse schema.DeployResponse
-	if err := json.Unmarshal(response, &deployResponse); err != nil {
-		return schema.DeployResponse{}, errors.Wrap(err, "/deploy", string(response))
+	var deployResults []schema.DeployResult
+	if err := json.Unmarshal(response, &deployResults); err != nil {
+		return nil, errors.Wrap(err, "/deploy", string(response))
 	}
 
-	return deployResponse, nil
+	return deployResults, nil
 }

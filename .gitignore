@@ -9,6 +9,7 @@ __pycache__/
 .python-version
 .env
 .venv
+*.egg-info
 
 # OSX
 .DS_Store
@@ -17,4 +18,4 @@ __pycache__/
 # MISC
 *.zip
 .unison*
-.vscode
+.vscode/

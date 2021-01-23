@@ -1,152 +1,114 @@
-<!-- Delete on release branches -->
-<img src='https://s3-us-west-2.amazonaws.com/cortex-public/logo.png' height='88'>
-
-# Machine learning model serving infrastructure
+<img src='https://s3-us-west-2.amazonaws.com/cortex-public/logo.png' height='42'>
 
 <br>
 
-<!-- Delete on release branches -->
-<!-- CORTEX_VERSION_README_MINOR -->
-[install](https://docs.cortex.dev/install) • [docs](https://docs.cortex.dev) • [examples](https://github.com/cortexlabs/cortex/tree/0.17/examples) • [we're hiring](https://angel.co/cortex-labs-inc/jobs) • [chat with us](https://gitter.im/cortexlabs/cortex)<br><br>
+# Run inference at scale
 
-<!-- Set header Cache-Control=no-cache on the S3 object metadata (see https://help.github.com/en/articles/about-anonymized-image-urls) -->
-![Demo](https://d1zqebknpdh033.cloudfront.net/demo/gif/v0.13_2.gif)
+Cortex is an open source platform for large-scale inference workloads.
 
 <br>
 
-## Key features
+## Model serving infrastructure
 
-* **Multi framework:** deploy TensorFlow, PyTorch, scikit-learn, and other models.
-* **Autoscaling:** automatically scale APIs to handle production workloads.
-* **ML instances:** run inference on G4, P2, M5, C5 and other AWS instance types.
-* **Spot instances:** save money with spot instances.
-* **Multi-model endpoints:** deploy multiple models in a single API.
-* **Rolling updates:** update deployed APIs with no downtime.
-* **Log streaming:** stream logs from deployed models to your CLI.
-* **Prediction monitoring:** monitor API performance and prediction results.
+* Supports deploying TensorFlow, PyTorch, and other models as realtime or batch APIs.
+* Ensures high availability with availability zones and automated instance restarts.
+* Runs inference on on-demand instances or spot instances with on-demand backups.
+* Autoscales to handle production workloads with support for overprovisioning.
 
-<br>
+#### Configure a cluster
 
-## Deploying a model
+```yaml
+# cluster.yaml
 
-### Install the CLI
-
-<!-- CORTEX_VERSION_README_MINOR -->
-```bash
-$ bash -c "$(curl -sS https://raw.githubusercontent.com/cortexlabs/cortex/0.17/get-cli.sh)"
+region: us-east-1
+instance_type: g4dn.xlarge
+min_instances: 10
+max_instances: 100
+spot: true
 ```
 
-### Implement your predictor
+#### Spin up on your AWS or GCP account
+
+```text
+$ cortex cluster up --config cluster.yaml
+
+￮ configuring autoscaling ✓
+￮ configuring networking ✓
+￮ configuring logging ✓
+
+cortex is ready!
+```
+
+<br>
+
+## Reproducible deployments
+
+* Package dependencies, code, and configuration for reproducible deployments.
+* Configure compute, autoscaling, and networking for each API.
+* Integrate with your data science platform or CI/CD system.
+* Deploy custom Docker images or use the pre-built defaults.
+
+#### Define an API
 
 ```python
 # predictor.py
 
+from transformers import pipeline
+
 class PythonPredictor:
     def __init__(self, config):
-        self.model = download_model()
+        self.model = pipeline(task="text-generation")
 
     def predict(self, payload):
-        return self.model.predict(payload["text"])
+        return self.model(payload["text"])[0]
 ```
 
-### Configure your deployment
+#### Configure an API
 
 ```yaml
-# cortex.yaml
+# text_generator.yaml
 
-- name: sentiment-classifier
+- name: text-generator
+  kind: RealtimeAPI
   predictor:
     type: python
     path: predictor.py
   compute:
     gpu: 1
-    mem: 4G
-```
-
-### Deploy your model
-
-```bash
-$ cortex deploy
-
-creating sentiment-classifier
-```
-
-### Serve predictions
-
-```bash
-$ curl http://localhost:8888 \
-    -X POST -H "Content-Type: application/json" \
-    -d '{"text": "serving models locally is cool!"}'
-
-positive
+    mem: 8Gi
+  autoscaling:
+    min_replicas: 1
+    max_replicas: 10
 ```
 
 <br>
 
-## Deploying models at scale
+## Scalable machine learning APIs
 
-### Spin up a cluster
+* Scale to handle production workloads with request-based autoscaling.
+* Stream performance metrics and logs to any monitoring tool.
+* Serve many models efficiently with multi-model caching.
+* Use rolling updates to update APIs without downtime.
+* Configure traffic splitting for A/B testing.
 
-Cortex clusters are designed to be self-hosted on any AWS account:
-
-```bash
-$ cortex cluster up
-
-aws region: us-east-1
-aws instance type: g4dn.xlarge
-spot instances: yes
-min instances: 0
-max instances: 5
-
-your cluster will cost $0.19 - $2.85 per hour based on cluster size and spot instance pricing/availability
-
-￮ spinning up your cluster ...
-
-your cluster is ready!
-```
-
-### Deploy to your cluster with the same code and configuration
+#### Deploy to your cluster
 
 ```bash
-$ cortex deploy --env aws
+$ cortex deploy text_generator.yaml
 
-creating sentiment-classifier
+# creating http://example.com/text-generator
 ```
 
-### Serve predictions at scale
+#### Consume your API
 
 ```bash
-$ curl http://***.amazonaws.com/sentiment-classifier \
-    -X POST -H "Content-Type: application/json" \
-    -d '{"text": "serving models at scale is really cool!"}'
-
-positive
+$ curl http://example.com/text-generator -X POST -H "Content-Type: application/json" -d '{"text": "hello world"}'
 ```
-
-### Monitor your deployment
-
-```bash
-$ cortex get sentiment-classifier
-
-status   up-to-date   requested   last update   avg request   2XX
-live     1            1           8s            24ms          12
-
-class     count
-positive  8
-negative  4
-```
-
-### How it works
-
-The CLI sends configuration and code to the cluster every time you run `cortex deploy`. Each model is loaded into a Docker container, along with any Python packages and request handling code. The model is exposed as a web service using a Network Load Balancer (NLB) and FastAPI / TensorFlow Serving / ONNX Runtime (depending on the model type). The containers are orchestrated on Elastic Kubernetes Service (EKS) while logs and metrics are streamed to CloudWatch.
-
-Cortex manages its own Kubernetes cluster so that end-to-end functionality like request-based autoscaling, GPU support, and spot instance management can work out of the box without any additional DevOps work.
 
 <br>
 
-## Examples
+## Get started
 
-<!-- CORTEX_VERSION_README_MINOR x3 -->
-* [Image classification](https://github.com/cortexlabs/cortex/tree/0.17/examples/tensorflow/image-classifier): deploy an Inception model to classify images.
-* [Search completion](https://github.com/cortexlabs/cortex/tree/0.17/examples/pytorch/search-completer): deploy Facebook's RoBERTa model to complete search terms.
-* [Text generation](https://github.com/cortexlabs/cortex/tree/0.17/examples/pytorch/text-generator): deploy Hugging Face's DistilGPT2 model to generate text.
+* [Read the docs](https://docs.cortex.dev)
+* [Report an issue](https://github.com/cortexlabs/cortex/issues)
+* [Join our community](https://gitter.im/cortexlabs/cortex)

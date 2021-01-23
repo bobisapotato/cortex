@@ -1,4 +1,4 @@
-# Copyright 2020 Cortex Labs, Inc.
+# Copyright 2021 Cortex Labs, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -16,26 +16,30 @@ import requests
 import re
 from string import Template
 
-# https://aws.amazon.com/about-aws/global-infrastructure/regional-product-services/
+# https://docs.aws.amazon.com/general/latest/gr/eks.html
 # China regions don't seem to support these endpoints (yet?)
+# GovCloud is skipped
 REGIONS = [
-    "us-east-1",  # N. Virginia
     "us-east-2",  # Ohio
+    "us-east-1",  # N. Virginia
+    "us-west-1",  # California
     "us-west-2",  # Oregon
+    "af-south-1",  # Cape town
+    "ap-east-1",  # Hong Kong
+    "ap-south-1",  # Mumbai
+    "ap-northeast-2",  # Seoul
+    "ap-southeast-1",  # Singapore
+    "ap-southeast-2",  # Sydney
+    "ap-northeast-1",  # Tokyo
     "ca-central-1",  # Montreal
-    "sa-east-1",  # Sao Paulo
     "eu-central-1",  # Frankfurt
     "eu-west-1",  # Ireland
     "eu-west-2",  # London
+    "eu-south-1",  # Milan
     "eu-west-3",  # Paris
     "eu-north-1",  # Stockholm
     "me-south-1",  # Bahrain
-    "ap-southeast-1",  # Singapore
-    "ap-northeast-1",  # Tokyo
-    "ap-southeast-2",  # Sydney
-    "ap-northeast-2",  # Seoul
-    "ap-south-1",  # Mumbai
-    "ap-east-1",  # Hong Kong
+    "sa-east-1",  # Sao Paulo
 ]
 
 OUTPUT_FILE_NAME = "resource_metadata.go"
@@ -47,6 +51,13 @@ EC2_PRICING_ENDPOINT_TEMPLATE = (
 EKS_PRICING_ENDPOINT_TEMPLATE = (
     "https://pricing.us-east-1.amazonaws.com/offers/v1.0/aws/AmazonEKS/current/{}/index.json"
 )
+
+inf_per_instance_type = {
+    "inf1.xlarge": 1,
+    "inf1.2xlarge": 1,
+    "inf1.6xlarge": 4,
+    "inf1.24xlarge": 16,
+}
 
 
 def get_instance_metadatas(pricing):
@@ -144,10 +155,7 @@ def get_ebs_metadata(pricing):
         ]
         price = list(price_dimensions.values())[0]["pricePerUnit"]["USD"]
 
-        metadata = {
-            "type": product["attributes"].get("volumeApiName"),
-            "price_gb": float(price),
-        }
+        metadata = {"type": product["attributes"].get("volumeApiName"), "price_gb": float(price)}
 
         # io1 has per IOPS pricing --> add pricing to metadata
         # if storagedevice does not price per IOPS will set value to 0
@@ -208,7 +216,7 @@ def get_eks_price(region):
 
 file_template = Template(
     """/*
-Copyright 2020 Cortex Labs, Inc.
+Copyright 2021 Cortex Labs, Inc.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -232,12 +240,13 @@ import (
 )
 
 type InstanceMetadata struct {
-	Region string             `json:"region"`
-	Type   string             `json:"type"`
-	Memory kresource.Quantity `json:"memory"`
-	CPU    kresource.Quantity `json:"cpu"`
-	GPU    int64              `json:"gpu"`
-	Price  float64            `json:"price"`
+	Region      string             `json:"region"`
+	Type        string             `json:"type"`
+	Memory      kresource.Quantity `json:"memory"`
+	CPU         kresource.Quantity `json:"cpu"`
+	GPU         int64              `json:"gpu"`
+	Inf         int64              `json:"inf"`
+	Price       float64            `json:"price"`
 }
 
 type NLBMetadata struct {
@@ -286,14 +295,14 @@ var EKSPrices = map[string]float64{
 )
 
 instance_region_map_template = Template(
-    """"${region}": map[string]InstanceMetadata{
+    """"${region}": {
 	${instance_metadatas}
 },
 """
 )
 
 instance_metadata_template = Template(
-    """"${type}": {Region: "${region}", Type: "${type}", Memory: kresource.MustParse("${memory}Mi"), CPU: kresource.MustParse("${cpu}"), GPU: ${gpu}, Price: ${price}},
+    """"${type}": {Region: "${region}", Type: "${type}", Memory: kresource.MustParse("${memory}Mi"), CPU: kresource.MustParse("${cpu}"), GPU: ${gpu}, Inf: ${inf}, Price: ${price}},
 """
 )
 
@@ -355,6 +364,7 @@ def main():
                     "memory": metadata["mem"],
                     "cpu": metadata["cpu"],
                     "gpu": metadata["gpu"],
+                    "inf": inf_per_instance_type.get(instance_type, 0),
                     "price": metadata["price"],
                 }
             )

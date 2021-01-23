@@ -1,5 +1,5 @@
 /*
-Copyright 2020 Cortex Labs, Inc.
+Copyright 2021 Cortex Labs, Inc.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -121,7 +121,11 @@ func Round(val float64, decimalPlaces int, padToDecimalPlaces int) string {
 
 // copied from https://yourbasic.org/golang/formatting-byte-size-to-human-readable-format/
 func IntToBase2Byte(size int) string {
-	const unit = 1024
+	return Int64ToBase2Byte(int64(size))
+}
+
+func Int64ToBase2Byte(size int64) string {
+	const unit int64 = 1024
 	if size < unit {
 		return fmt.Sprintf("%d B", size)
 	}
@@ -345,6 +349,11 @@ func YesNo(val bool) string {
 
 func Obj(val interface{}) string {
 	return strIndent(val, "  ", "", "\n", `"`)
+}
+
+// Same as Obj(), but trim leading and trailing quotes if it's just a string
+func ObjStripped(val interface{}) string {
+	return TrimPrefixAndSuffix(Obj(val), `"`)
 }
 
 func ObjFlat(val interface{}) string {

@@ -1,4 +1,4 @@
-# Copyright 2020 Cortex Labs, Inc.
+# Copyright 2021 Cortex Labs, Inc.
 #
 # Licensed under the Apache License, Version 2.0 (the "License");
 # you may not use this file except in compliance with the License.
@@ -31,4 +31,4 @@ if __name__ == "__main__":
     template = env.get_template(str(template_path.name))
     with open(cluster_config_path, "r") as f:
         cluster_config = yaml.safe_load(f)
-        print(template.render(config=cluster_config))
+        print(template.render(config=cluster_config, env=os.environ))

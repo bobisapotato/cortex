@@ -1,5 +1,5 @@
 /*
-Copyright 2020 Cortex Labs, Inc.
+Copyright 2021 Cortex Labs, Inc.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -18,17 +18,19 @@ package cluster
 
 import (
 	"fmt"
+	"path"
 
 	"github.com/cortexlabs/cortex/pkg/lib/errors"
 	"github.com/cortexlabs/cortex/pkg/lib/json"
 	"github.com/cortexlabs/cortex/pkg/lib/prompt"
 	s "github.com/cortexlabs/cortex/pkg/lib/strings"
 	"github.com/cortexlabs/cortex/pkg/operator/schema"
+	"github.com/cortexlabs/cortex/pkg/types/userconfig"
 )
 
 func Delete(operatorConfig OperatorConfig, apiName string, keepCache bool, force bool) (schema.DeleteResponse, error) {
 	if !force {
-		readyReplicas := getReadyReplicasOrNil(operatorConfig, apiName)
+		readyReplicas := getReadyRealtimeAPIReplicasOrNil(operatorConfig, apiName)
 		if readyReplicas != nil && *readyReplicas > 2 {
 			prompt.YesOrExit(fmt.Sprintf("are you sure you want to delete %s (which has %d live replicas)?", apiName, *readyReplicas), "", "")
 		}
@@ -53,17 +55,48 @@ func Delete(operatorConfig OperatorConfig, apiName string, keepCache bool, force
 	return deleteRes, nil
 }
 
-func getReadyReplicasOrNil(operatorConfig OperatorConfig, apiName string) *int32 {
+func getReadyRealtimeAPIReplicasOrNil(operatorConfig OperatorConfig, apiName string) *int32 {
 	httpRes, err := HTTPGet(operatorConfig, "/get/"+apiName)
 	if err != nil {
 		return nil
 	}
 
-	var apiRes schema.GetAPIResponse
+	var apiRes schema.APIResponse
 	if err = json.Unmarshal(httpRes, &apiRes); err != nil {
+		return nil
+	}
+
+	if apiRes.Status == nil {
 		return nil
 	}
 
 	totalReady := apiRes.Status.Updated.Ready + apiRes.Status.Stale.Ready
 	return &totalReady
+}
+
+func StopJob(operatorConfig OperatorConfig, kind userconfig.Kind, apiName string, jobID string) (schema.DeleteResponse, error) {
+	params := map[string]string{
+		"apiName": apiName,
+		"jobID":   jobID,
+	}
+
+	var endpointComponent string
+	if kind == userconfig.BatchAPIKind {
+		endpointComponent = "batch"
+	} else {
+		endpointComponent = "tasks"
+	}
+
+	httpRes, err := HTTPDelete(operatorConfig, path.Join("/"+endpointComponent, apiName), params)
+	if err != nil {
+		return schema.DeleteResponse{}, err
+	}
+
+	var deleteRes schema.DeleteResponse
+	err = json.Unmarshal(httpRes, &deleteRes)
+	if err != nil {
+		return schema.DeleteResponse{}, errors.Wrap(err, string(httpRes))
+	}
+
+	return deleteRes, nil
 }

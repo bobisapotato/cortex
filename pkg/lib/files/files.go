@@ -1,5 +1,5 @@
 /*
-Copyright 2020 Cortex Labs, Inc.
+Copyright 2021 Cortex Labs, Inc.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -26,6 +26,7 @@ import (
 	"net/http"
 	"os"
 	"os/exec"
+	"path"
 	"path/filepath"
 	"sort"
 	"strings"
@@ -33,14 +34,19 @@ import (
 	"github.com/cortexlabs/cortex/pkg/lib/errors"
 	"github.com/cortexlabs/cortex/pkg/lib/prompt"
 	"github.com/cortexlabs/cortex/pkg/lib/sets/strset"
+	"github.com/cortexlabs/cortex/pkg/lib/slices"
 	s "github.com/cortexlabs/cortex/pkg/lib/strings"
 	"github.com/denormal/go-gitignore"
 	"github.com/mitchellh/go-homedir"
+	"github.com/shirou/gopsutil/mem"
 	"github.com/xlab/treeprint"
 )
 
-var _homeDir string
+var (
+	_homeDir string
+)
 
+// the returned file should be closed by the caller
 func Open(path string) (*os.File, error) {
 	cleanPath, err := EscapeTilde(path)
 	if err != nil {
@@ -55,6 +61,7 @@ func Open(path string) (*os.File, error) {
 	return file, nil
 }
 
+// the returned file should be closed by the caller
 func OpenFile(path string, flag int, perm os.FileMode) (*os.File, error) {
 	cleanPath, err := EscapeTilde(path)
 	if err != nil {
@@ -69,6 +76,7 @@ func OpenFile(path string, flag int, perm os.FileMode) (*os.File, error) {
 	return file, err
 }
 
+// the returned file should be closed by the caller
 func Create(path string) (*os.File, error) {
 	cleanPath, err := EscapeTilde(path)
 	if err != nil {
@@ -129,6 +137,26 @@ func CreateFile(path string) error {
 	return nil
 }
 
+func WriteFileFromReader(reader io.Reader, path string) error {
+	cleanPath, err := EscapeTilde(path)
+	if err != nil {
+		return err
+	}
+
+	file, err := os.Create(cleanPath)
+	if err != nil {
+		return errors.Wrap(err, errors.Message(ErrorCreateFile(path)))
+	}
+	defer file.Close()
+
+	_, err = io.Copy(file, reader)
+	if err != nil {
+		return errors.Wrap(err, errors.Message(ErrorCreateFile(path)))
+	}
+
+	return nil
+}
+
 func WriteFile(data []byte, path string) error {
 	cleanPath, err := EscapeTilde(path)
 	if err != nil {
@@ -140,6 +168,10 @@ func WriteFile(data []byte, path string) error {
 	}
 
 	return nil
+}
+
+func IsAbsOrTildePrefixed(path string) bool {
+	return strings.HasPrefix(path, "/") || strings.HasPrefix(path, "~/")
 }
 
 // e.g. ~/path -> /home/ubuntu/path
@@ -166,6 +198,17 @@ func EscapeTilde(path string) (string, error) {
 
 	// path starts with "~/"
 	return filepath.Join(_homeDir, path[2:]), nil
+}
+
+// e.g. ~/path/../path2 -> /home/ubuntu/path2
+// returns without escaping tilde if there was an error
+func Clean(path string) (string, error) {
+	path, err := EscapeTilde(path)
+	path = filepath.Clean(path)
+	if err != nil {
+		return path, err
+	}
+	return path, nil
 }
 
 // e.g. /home/ubuntu/path -> ~/path
@@ -199,10 +242,11 @@ func TrimDirPrefix(fullPath string, dirPath string) string {
 }
 
 func RelToAbsPath(relativePath string, baseDir string) string {
-	if !filepath.IsAbs(relativePath) {
+	if !IsAbsOrTildePrefixed(relativePath) {
 		relativePath = filepath.Join(baseDir, relativePath)
 	}
-	return filepath.Clean(relativePath)
+	cleanPath, _ := Clean(relativePath)
+	return cleanPath
 }
 
 func UserRelToAbsPath(relativePath string) string {
@@ -214,21 +258,29 @@ func UserRelToAbsPath(relativePath string) string {
 }
 
 func PathRelativeToCWD(absPath string) string {
-	if !strings.HasPrefix(absPath, "/") {
-		return absPath
-	}
-
 	cwd, err := os.Getwd()
 	if err != nil {
 		return absPath
 	}
+	return PathRelativeToDir(absPath, cwd)
+}
 
-	cwd = s.EnsureSuffix(cwd, "/")
-	return strings.TrimPrefix(absPath, cwd)
+func PathRelativeToDir(absPath string, dir string) string {
+	if !IsAbsOrTildePrefixed(absPath) {
+		return absPath
+	}
+	absPath, _ = EscapeTilde(absPath)
+	dir, _ = EscapeTilde(dir)
+	dir = s.EnsureSuffix(dir, "/")
+	return strings.TrimPrefix(absPath, dir)
 }
 
 func DirPathRelativeToCWD(absPath string) string {
 	return s.EnsureSuffix(PathRelativeToCWD(absPath), "/")
+}
+
+func DirPathRelativeToDir(absPath string, dir string) string {
+	return s.EnsureSuffix(PathRelativeToDir(absPath, dir), "/")
 }
 
 func IsFileOrDir(path string) bool {
@@ -374,11 +426,10 @@ func ParentDir(dir string) string {
 }
 
 func SearchForFile(filename string, dir string) (string, error) {
-	dir, err := EscapeTilde(dir)
+	dir, err := Clean(dir)
 	if err != nil {
 		return "", err
 	}
-	dir = filepath.Clean(dir)
 
 	for true {
 		files, err := ioutil.ReadDir(dir)
@@ -403,11 +454,10 @@ func SearchForFile(filename string, dir string) (string, error) {
 }
 
 func MakeEmptyFile(path string) error {
-	cleanPath, err := EscapeTilde(path)
+	cleanPath, err := Clean(path)
 	if err != nil {
 		return err
 	}
-	cleanPath = filepath.Clean(cleanPath)
 
 	err = os.MkdirAll(filepath.Dir(cleanPath), os.ModePerm)
 	if err != nil {
@@ -520,7 +570,7 @@ func GitIgnoreFn(gitIgnorePath string) (IgnoreFn, error) {
 
 	ignore, err := gitignore.NewFromFile(gitIgnorePath)
 	if err != nil {
-		return nil, err
+		return nil, errors.Wrap(err, gitIgnorePath)
 	}
 
 	return func(path string, fi os.FileInfo) (bool, error) {
@@ -540,11 +590,118 @@ func PromptForFilesAboveSize(size int, promptMsgTemplate string) IgnoreFn {
 
 	return func(path string, fi os.FileInfo) (bool, error) {
 		if !fi.IsDir() && fi.Size() > int64(size) {
-			promptMsg := fmt.Sprintf(promptMsgTemplate, PathRelativeToCWD(path), s.IntToBase2Byte(int(fi.Size())))
+			promptMsg := fmt.Sprintf(promptMsgTemplate, PathRelativeToCWD(path), s.Int64ToBase2Byte(fi.Size()))
 			return !prompt.YesOrNo(promptMsg, "", ""), nil
 		}
 		return false, nil
 	}
+}
+
+func ErrorOnBigFilesFn(maxFileSizeBytes int64) IgnoreFn {
+	return func(path string, fi os.FileInfo) (bool, error) {
+		if !fi.IsDir() {
+			fileSizeBytes := fi.Size()
+			virtual, _ := mem.VirtualMemory()
+			if fileSizeBytes > int64(virtual.Available) {
+				return false, errors.Wrap(
+					ErrorInsufficientMemoryToReadFile(fileSizeBytes, int64(virtual.Available)),
+					path,
+				)
+			}
+			if fileSizeBytes > maxFileSizeBytes {
+				return false, errors.Wrap(ErrorFileSizeLimit(maxFileSizeBytes), path)
+			}
+		}
+
+		return false, nil
+	}
+}
+
+func ErrorOnProjectSizeLimit(maxProjectSizeBytes int64) IgnoreFn {
+	filesSizeSum := int64(0)
+	return func(path string, fi os.FileInfo) (bool, error) {
+		if !fi.IsDir() {
+			filesSizeSum += fi.Size()
+			if filesSizeSum > maxProjectSizeBytes {
+				return false, errors.Wrap(ErrorProjectSizeLimit(maxProjectSizeBytes), path)
+			}
+		}
+		return false, nil
+	}
+}
+
+// Retrieves the longest common path given a list of paths.
+func LongestCommonPath(paths ...string) string {
+
+	// Handle special cases.
+	switch len(paths) {
+	case 0:
+		return ""
+	case 1:
+		return path.Clean(paths[0])
+	}
+
+	startsWithSlash := false
+	allStartWithSlash := true
+
+	var splitPaths [][]string
+	shortestPathLength := -1
+	for _, path := range paths {
+		if strings.HasPrefix(path, "/") {
+			startsWithSlash = true
+		} else {
+			allStartWithSlash = false
+		}
+
+		splitPath := slices.RemoveEmpties(strings.Split(path, "/"))
+		splitPaths = append(splitPaths, splitPath)
+
+		if len(splitPath) < shortestPathLength || shortestPathLength == -1 {
+			shortestPathLength = len(splitPath)
+		}
+	}
+
+	commonPath := ""
+	numPaths := len(splitPaths)
+
+	for level := 0; level < shortestPathLength; level++ {
+		element := splitPaths[0][level]
+		counter := 1
+		for _, splitPath := range splitPaths[1:] {
+			if splitPath[level] != element {
+				break
+			}
+			counter++
+		}
+
+		if counter != numPaths {
+			break
+		}
+
+		commonPath = filepath.Join(commonPath, element)
+	}
+	if commonPath != "" && startsWithSlash {
+		commonPath = s.EnsurePrefix(commonPath, "/")
+		commonPath = s.EnsureSuffix(commonPath, "/")
+	}
+	if commonPath == "" && allStartWithSlash {
+		return "/"
+	}
+
+	return commonPath
+}
+
+func FilterPathsWithDirPrefix(paths []string, prefix string) []string {
+	prefix = s.EnsureSuffix(prefix, "/")
+
+	var filteredPaths []string
+	for _, path := range paths {
+		if strings.HasPrefix(path, prefix) {
+			filteredPaths = append(filteredPaths, path)
+		}
+	}
+
+	return filteredPaths
 }
 
 type DirsOrder string
@@ -598,7 +755,7 @@ func FileTree(paths []string, cwd string, dirsOrder DirsOrder) string {
 		dirPaths = DirPaths(paths, true)
 	}
 
-	commonPrefix := s.LongestCommonPrefix(dirPaths...)
+	commonPrefix := LongestCommonPath(dirPaths...)
 	paths, _ = s.TrimPrefixIfPresentInAll(paths, commonPrefix)
 
 	var header string
@@ -608,9 +765,11 @@ func FileTree(paths []string, cwd string, dirsOrder DirsOrder) string {
 	} else if !didTrimCwd && commonPrefix == "" {
 		header = ""
 	} else if didTrimCwd && commonPrefix != "" {
-		header = "./" + commonPrefix + "\n"
+		header = "./" + commonPrefix
+		header = s.EnsureSingleOccurrenceCharSuffix(header, "/") + "\n"
 	} else if !didTrimCwd && commonPrefix != "" {
-		header = commonPrefix + "\n"
+		header = commonPrefix + "/"
+		header = s.EnsureSingleOccurrenceCharSuffix(header, "/") + "\n"
 	}
 
 	tree := treeprint.New()
@@ -653,6 +812,11 @@ func getTreeBranch(dir string, cachedTrees map[string]treeprint.Tree) treeprint.
 	return branch
 }
 
+// Return the path to the directory containing the provided path (with a trailing slash)
+func Dir(path string) string {
+	return s.EnsureSuffix(filepath.Dir(path), "/")
+}
+
 func DirPaths(paths []string, addTrailingSlash bool) []string {
 	suffix := ""
 	if addTrailingSlash {
@@ -666,11 +830,10 @@ func DirPaths(paths []string, addTrailingSlash bool) []string {
 }
 
 func ListDirRecursive(dir string, relative bool, ignoreFns ...IgnoreFn) ([]string, error) {
-	cleanDir, err := EscapeTilde(dir)
+	cleanDir, err := Clean(dir)
 	if err != nil {
 		return nil, err
 	}
-	cleanDir = filepath.Clean(cleanDir)
 	cleanDir = strings.TrimSuffix(cleanDir, "/")
 
 	if err := CheckDir(cleanDir); err != nil {
@@ -686,7 +849,7 @@ func ListDirRecursive(dir string, relative bool, ignoreFns ...IgnoreFn) ([]strin
 		for _, ignoreFn := range ignoreFns {
 			ignore, err := ignoreFn(path, fi)
 			if err != nil {
-				return errors.Wrap(err, path)
+				return err
 			}
 			if ignore {
 				if fi.IsDir() {
@@ -713,11 +876,10 @@ func ListDirRecursive(dir string, relative bool, ignoreFns ...IgnoreFn) ([]strin
 }
 
 func ListDir(dir string, relative bool) ([]string, error) {
-	cleanDir, err := EscapeTilde(dir)
+	cleanDir, err := Clean(dir)
 	if err != nil {
 		return nil, err
 	}
-	cleanDir = filepath.Clean(cleanDir)
 	cleanDir = strings.TrimSuffix(cleanDir, "/")
 
 	if err := CheckDir(cleanDir); err != nil {

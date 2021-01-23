@@ -1,5 +1,5 @@
 /*
-Copyright 2020 Cortex Labs, Inc.
+Copyright 2021 Cortex Labs, Inc.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -17,6 +17,8 @@ limitations under the License.
 package k8s
 
 import (
+	"context"
+
 	"github.com/cortexlabs/cortex/pkg/lib/errors"
 	kautoscaling "k8s.io/api/autoscaling/v2beta2"
 	kcore "k8s.io/api/core/v1"
@@ -74,7 +76,7 @@ func HPA(spec *HPASpec) *kautoscaling.HorizontalPodAutoscaler {
 
 func (c *Client) CreateHPA(hpa *kautoscaling.HorizontalPodAutoscaler) (*kautoscaling.HorizontalPodAutoscaler, error) {
 	hpa.TypeMeta = _hpaTypeMeta
-	hpa, err := c.hpaClient.Create(hpa)
+	hpa, err := c.hpaClient.Create(context.Background(), hpa, kmeta.CreateOptions{})
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}
@@ -83,7 +85,7 @@ func (c *Client) CreateHPA(hpa *kautoscaling.HorizontalPodAutoscaler) (*kautosca
 
 func (c *Client) UpdateHPA(hpa *kautoscaling.HorizontalPodAutoscaler) (*kautoscaling.HorizontalPodAutoscaler, error) {
 	hpa.TypeMeta = _hpaTypeMeta
-	hpa, err := c.hpaClient.Update(hpa)
+	hpa, err := c.hpaClient.Update(context.Background(), hpa, kmeta.UpdateOptions{})
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}
@@ -102,11 +104,11 @@ func (c *Client) ApplyHPA(hpa *kautoscaling.HorizontalPodAutoscaler) (*kautoscal
 }
 
 func (c *Client) GetHPA(name string) (*kautoscaling.HorizontalPodAutoscaler, error) {
-	hpa, err := c.hpaClient.Get(name, kmeta.GetOptions{})
-	if kerrors.IsNotFound(err) {
-		return nil, nil
-	}
+	hpa, err := c.hpaClient.Get(context.Background(), name, kmeta.GetOptions{})
 	if err != nil {
+		if kerrors.IsNotFound(err) {
+			return nil, nil
+		}
 		return nil, errors.WithStack(err)
 	}
 	hpa.TypeMeta = _hpaTypeMeta
@@ -114,11 +116,11 @@ func (c *Client) GetHPA(name string) (*kautoscaling.HorizontalPodAutoscaler, err
 }
 
 func (c *Client) DeleteHPA(name string) (bool, error) {
-	err := c.hpaClient.Delete(name, _deleteOpts)
-	if kerrors.IsNotFound(err) {
-		return false, nil
-	}
+	err := c.hpaClient.Delete(context.Background(), name, _deleteOpts)
 	if err != nil {
+		if kerrors.IsNotFound(err) {
+			return false, nil
+		}
 		return false, errors.WithStack(err)
 	}
 	return true, nil
@@ -128,7 +130,7 @@ func (c *Client) ListHPAs(opts *kmeta.ListOptions) ([]kautoscaling.HorizontalPod
 	if opts == nil {
 		opts = &kmeta.ListOptions{}
 	}
-	hpaList, err := c.hpaClient.List(*opts)
+	hpaList, err := c.hpaClient.List(context.Background(), *opts)
 	if err != nil {
 		return nil, errors.WithStack(err)
 	}

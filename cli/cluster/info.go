@@ -1,5 +1,5 @@
 /*
-Copyright 2020 Cortex Labs, Inc.
+Copyright 2021 Cortex Labs, Inc.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -29,6 +29,21 @@ func Info(operatorConfig OperatorConfig) (*schema.InfoResponse, error) {
 	}
 
 	var infoResponse schema.InfoResponse
+	err = json.Unmarshal(httpResponse, &infoResponse)
+	if err != nil {
+		return nil, errors.Wrap(err, "/info", string(httpResponse))
+	}
+
+	return &infoResponse, nil
+}
+
+func InfoGCP(operatorConfig OperatorConfig) (*schema.InfoGCPResponse, error) {
+	httpResponse, err := HTTPGet(operatorConfig, "/info")
+	if err != nil {
+		return nil, errors.Wrap(err, "unable to connect to operator", "/info")
+	}
+
+	var infoResponse schema.InfoGCPResponse
 	err = json.Unmarshal(httpResponse, &infoResponse)
 	if err != nil {
 		return nil, errors.Wrap(err, "/info", string(httpResponse))

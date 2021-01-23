@@ -1,5 +1,5 @@
 /*
-Copyright 2020 Cortex Labs, Inc.
+Copyright 2021 Cortex Labs, Inc.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -22,12 +22,22 @@ import (
 
 	"github.com/cortexlabs/cortex/pkg/lib/errors"
 	"github.com/cortexlabs/cortex/pkg/lib/telemetry"
+	"github.com/cortexlabs/cortex/pkg/operator/lib/logging"
 	"github.com/cortexlabs/cortex/pkg/operator/schema"
 )
 
+var operatorLogger = logging.GetOperatorLogger()
+
 func respond(w http.ResponseWriter, response interface{}) {
+	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(http.StatusOK)
 	json.NewEncoder(w).Encode(response)
+}
+
+func respondPlainText(w http.ResponseWriter, response string) {
+	w.Header().Set("Content-Type", "text/plain")
+	w.WriteHeader(http.StatusOK)
+	w.Write([]byte(response))
 }
 
 func respondError(w http.ResponseWriter, r *http.Request, err error, strs ...string) {
@@ -48,9 +58,10 @@ func respondErrorCode(w http.ResponseWriter, r *http.Request, code int, err erro
 	}
 
 	if !errors.IsNoPrint(err) {
-		errors.PrintError(err)
+		operatorLogger.Error(err)
 	}
 
+	w.Header().Set("Content-Type", "application/json")
 	w.WriteHeader(code)
 
 	response := schema.ErrorResponse{
@@ -63,7 +74,7 @@ func respondErrorCode(w http.ResponseWriter, r *http.Request, code int, err erro
 func recoverAndRespond(w http.ResponseWriter, r *http.Request, strs ...string) {
 	if errInterface := recover(); errInterface != nil {
 		err := errors.CastRecoverError(errInterface, strs...)
-		errors.PrintStacktrace(err)
+		operatorLogger.Error(err)
 		telemetry.Error(err)
 		respondError(w, r, err)
 	}

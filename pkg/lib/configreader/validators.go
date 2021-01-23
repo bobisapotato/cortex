@@ -1,5 +1,5 @@
 /*
-Copyright 2020 Cortex Labs, Inc.
+Copyright 2021 Cortex Labs, Inc.
 
 Licensed under the Apache License, Version 2.0 (the "License");
 you may not use this file except in compliance with the License.
@@ -117,6 +117,10 @@ func DurationParser(v *DurationValidation) func(string) (interface{}, error) {
 			return nil, err
 		}
 
+		if v == nil {
+			return d, nil
+		}
+
 		if v.GreaterThan != nil {
 			if d <= *v.GreaterThan {
 				return nil, ErrorMustBeGreaterThan(str, *v.GreaterThan)
@@ -152,7 +156,7 @@ func DurationParser(v *DurationValidation) func(string) (interface{}, error) {
 }
 
 func ValidateImageVersion(image, cortexVersion string) (string, error) {
-	if !strings.HasPrefix(image, "cortexlabs/") && !strings.HasPrefix(image, "cortexlabsdev/") {
+	if !strings.HasPrefix(image, "quay.io/cortexlabs/") && !strings.HasPrefix(image, "quay.io/cortexlabsdev/") && !strings.HasPrefix(image, "cortexlabs/") && !strings.HasPrefix(image, "cortexlabsdev/") {
 		return image, nil
 	}
 
