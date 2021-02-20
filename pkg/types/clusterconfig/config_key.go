@@ -68,6 +68,11 @@ const (
 	ImageIstioProxyKey                     = "image_istio_proxy"
 	ImageIstioPilotKey                     = "image_istio_pilot"
 	ImageGooglePauseKey                    = "image_google_pause"
+	ImagePrometheusKey                     = "image_prometheus"
+	ImagePrometheusConfigReloaderKey       = "image_prometheus_config_reloader"
+	ImagePrometheusOperatorKey             = "image_prometheus_operator"
+	ImagePrometheusStatsDExporterKey       = "image_prometheus_statsd_exporter"
+	ImageGrafanaKey                        = "image_grafana"
 
 	// User facing string
 	ProviderUserKey                            = "provider"
@@ -117,8 +122,12 @@ const (
 	ImageNeuronRTDUserKey                      = "neuron rtd image"
 	ImageNvidiaUserKey                         = "nvidia image"
 	ImageFluentBitUserKey                      = "fluent-bit image"
-	ImageStatsdUserKey                         = "statsd image"
 	ImageIstioProxyUserKey                     = "istio proxy image"
 	ImageIstioPilotUserKey                     = "istio pilot image"
 	ImageGooglePauseUserKey                    = "google pause image"
+	ImagePrometheusUserKey                     = "prometheus image"
+	ImagePrometheusConfigReloaderUserKey       = "prometheus config reloader image"
+	ImagePrometheusOperatorUserKey             = "prometheus operator image"
+	ImagePrometheusStatsDExporterUserKey       = "prometheus statsd exporter image"
+	ImageGrafanaUserKey                        = "grafana image"
 )

@@ -67,7 +67,8 @@ function cluster_up_aws() {
 
   echo -n "￮ configuring metrics "
   envsubst < manifests/metrics-server.yaml | kubectl apply -f - >/dev/null
-  envsubst < manifests/statsd.yaml | kubectl apply -f - >/dev/null
+  setup_prometheus
+  setup_grafana
   echo "✓"
 
   if [[ "$CORTEX_INSTANCE_TYPE" == p* ]] || [[ "$CORTEX_INSTANCE_TYPE" == g* ]]; then
@@ -90,7 +91,7 @@ function cluster_up_aws() {
 
   echo -e "\ncortex is ready!"
   if [ "$CORTEX_OPERATOR_LOAD_BALANCER_SCHEME" == "internal" ]; then
-    echo -e "note: you will need to configure VPC Peering to connect to your cluster: https://docs.cortex.dev/v/${CORTEX_VERSION_MINOR}/"
+    echo -e "\nnote: you will need to configure VPC Peering to connect to your cluster: https://docs.cortex.dev/v/${CORTEX_VERSION_MINOR}/"
   fi
 
   print_endpoints_aws
@@ -121,6 +122,11 @@ function cluster_up_gcp() {
   echo -n "￮ configuring logging "
   python render_template.py $CORTEX_CLUSTER_CONFIG_FILE manifests/fluent-bit.yaml.j2 > /workspace/fluent-bit.yaml
   kubectl apply -f /workspace/fluent-bit.yaml >/dev/null
+  echo "✓"
+
+  echo -n "￮ configuring metrics "
+  setup_prometheus
+  setup_grafana
   echo "✓"
 
   if [ -n "$CORTEX_ACCELERATOR_TYPE" ]; then
@@ -202,7 +208,7 @@ function create_eks() {
 
   echo -e "￮ spinning up the cluster (this will take about 25 minutes) ...\n"
   python generate_eks.py $CORTEX_CLUSTER_CONFIG_FILE > /workspace/eks.yaml
-  eksctl create cluster --timeout=$EKSCTL_TIMEOUT --install-neuron-plugin=false -f /workspace/eks.yaml
+  eksctl create cluster --timeout=$EKSCTL_TIMEOUT --install-neuron-plugin=false --install-nvidia-plugin=false -f /workspace/eks.yaml
   echo
 
   suspend_az_rebalance
@@ -294,8 +300,20 @@ function setup_secrets() {
     -o yaml --dry-run=client | kubectl apply -f - >/dev/null
 }
 
+function setup_prometheus() {
+  envsubst < manifests/prometheus-operator.yaml | kubectl apply -f - >/dev/null
+  envsubst < manifests/prometheus-statsd-exporter.yaml | kubectl apply -f - >/dev/null
+  python render_template.py $CORTEX_CLUSTER_CONFIG_FILE manifests/prometheus-monitoring.yaml.j2 | kubectl apply -f - >/dev/null
+}
+
+function setup_grafana() {
+  kubectl apply -f manifests/grafana/grafana-dashboard-realtime.yaml >/dev/null
+  kubectl apply -f manifests/grafana/grafana-dashboard-batch.yaml >/dev/null
+  envsubst < manifests/grafana/grafana.yaml | kubectl apply -f - >/dev/null
+}
+
 function setup_secrets_gcp() {
-  kubectl create secret generic 'gcp-credentials' --from-file=$GOOGLE_APPLICATION_CREDENTIALS >/dev/null
+  kubectl create secret generic 'gcp-credentials' --from-file=key.json=$GOOGLE_APPLICATION_CREDENTIALS >/dev/null
 }
 
 function restart_operator() {
@@ -422,18 +440,16 @@ function setup_istio() {
 
 function start_pre_download_images() {
   registry="quay.io/cortexlabs"
-  tag="$CORTEX_VERSION"
   if [ -n "$CORTEX_DEV_DEFAULT_PREDICTOR_IMAGE_REGISTRY" ]; then
     registry="$CORTEX_DEV_DEFAULT_PREDICTOR_IMAGE_REGISTRY"
-    tag="latest"
   fi
-  export CORTEX_IMAGE_PYTHON_PREDICTOR_CPU="${registry}/python-predictor-cpu:${tag}"
-  export CORTEX_IMAGE_PYTHON_PREDICTOR_GPU="${registry}/python-predictor-gpu:${tag}"
-  export CORTEX_IMAGE_PYTHON_PREDICTOR_INF="${registry}/python-predictor-inf:${tag}"
-  export CORTEX_IMAGE_TENSORFLOW_SERVING_CPU="${registry}/tensorflow-serving-cpu:${tag}"
-  export CORTEX_IMAGE_TENSORFLOW_SERVING_GPU="${registry}/tensorflow-serving-gpu:${tag}"
-  export CORTEX_IMAGE_TENSORFLOW_SERVING_INF="${registry}/tensorflow-serving-inf:${tag}"
-  export CORTEX_IMAGE_TENSORFLOW_PREDICTOR="${registry}/tensorflow-predictor:${tag}"
+  export CORTEX_IMAGE_PYTHON_PREDICTOR_CPU="${registry}/python-predictor-cpu:${CORTEX_VERSION}"
+  export CORTEX_IMAGE_PYTHON_PREDICTOR_GPU="${registry}/python-predictor-gpu:${CORTEX_VERSION}-cuda10.2-cudnn8"
+  export CORTEX_IMAGE_PYTHON_PREDICTOR_INF="${registry}/python-predictor-inf:${CORTEX_VERSION}"
+  export CORTEX_IMAGE_TENSORFLOW_SERVING_CPU="${registry}/tensorflow-serving-cpu:${CORTEX_VERSION}"
+  export CORTEX_IMAGE_TENSORFLOW_SERVING_GPU="${registry}/tensorflow-serving-gpu:${CORTEX_VERSION}"
+  export CORTEX_IMAGE_TENSORFLOW_SERVING_INF="${registry}/tensorflow-serving-inf:${CORTEX_VERSION}"
+  export CORTEX_IMAGE_TENSORFLOW_PREDICTOR="${registry}/tensorflow-predictor:${CORTEX_VERSION}"
 
   if [[ "$CORTEX_INSTANCE_TYPE" == p* ]] || [[ "$CORTEX_INSTANCE_TYPE" == g* ]] || [ -n "$CORTEX_ACCELERATOR_TYPE" ]; then
     envsubst < manifests/image-downloader-gpu.yaml | kubectl apply -f - &>/dev/null

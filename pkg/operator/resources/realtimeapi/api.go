@@ -29,7 +29,6 @@ import (
 	"github.com/cortexlabs/cortex/pkg/operator/lib/routines"
 	"github.com/cortexlabs/cortex/pkg/operator/operator"
 	"github.com/cortexlabs/cortex/pkg/operator/schema"
-	"github.com/cortexlabs/cortex/pkg/types"
 	"github.com/cortexlabs/cortex/pkg/types/spec"
 	"github.com/cortexlabs/cortex/pkg/types/status"
 	"github.com/cortexlabs/cortex/pkg/types/userconfig"
@@ -37,6 +36,8 @@ import (
 	kapps "k8s.io/api/apps/v1"
 	kcore "k8s.io/api/core/v1"
 )
+
+const _realtimeDashboardUID = "realtimeapi"
 
 var _autoscalerCrons = make(map[string]cron.Cron) // apiName -> cron
 
@@ -72,13 +73,6 @@ func UpdateAPI(apiConfig *userconfig.API, projectID string, force bool) (*spec.A
 				deleteK8sResources(api.Name)
 			})
 			return nil, "", err
-		}
-
-		if config.Provider == types.AWSProviderType {
-			err = addAPIToDashboard(config.ClusterName(), api.Name)
-			if err != nil {
-				errors.PrintError(err)
-			}
 		}
 
 		return api, fmt.Sprintf("creating %s", api.Resource.UserString()), nil
@@ -177,25 +171,6 @@ func DeleteAPI(apiName string, keepCache bool) error {
 			deleteBucketResources(apiName)
 			return nil
 		},
-		// delete api from cloudwatch dashboard
-		func() error {
-			if config.Provider == types.AWSProviderType {
-				virtualServices, err := config.K8s.ListVirtualServicesByLabel("apiKind", userconfig.RealtimeAPIKind.String())
-				if err != nil {
-					return errors.Wrap(err, "failed to get virtual services")
-				}
-				// extract all api names from statuses
-				allAPINames := make([]string, len(virtualServices))
-				for i, virtualService := range virtualServices {
-					allAPINames[i] = virtualService.Labels["apiName"]
-				}
-				err = removeAPIFromDashboard(allAPINames, config.ClusterName(), apiName)
-				if err != nil {
-					return errors.Wrap(err, "failed to delete API from dashboard")
-				}
-			}
-			return nil
-		},
 	)
 
 	if err != nil {
@@ -274,10 +249,7 @@ func GetAPIByName(deployedResource *operator.DeployedResource) ([]schema.APIResp
 		return nil, err
 	}
 
-	var dashboardURL *string
-	if config.Provider == types.AWSProviderType {
-		dashboardURL = pointer.String(DashboardURL())
-	}
+	dashboardURL := pointer.String(getDashboardURL(api.Name))
 
 	return []schema.APIResponse{
 		{
@@ -352,10 +324,8 @@ func applyK8sDeployment(api *spec.API, prevDeployment *kapps.Deployment) error {
 		}
 	}
 
-	if config.Provider == types.AWSProviderType {
-		if err := UpdateAutoscalerCron(newDeployment, api); err != nil {
-			return err
-		}
+	if err := UpdateAutoscalerCron(newDeployment, api); err != nil {
+		return err
 	}
 
 	return nil
@@ -429,15 +399,6 @@ func deleteBucketResources(apiName string) error {
 	return config.DeleteBucketDir(prefix, true)
 }
 
-func IsAPIUpdating(apiName string) (bool, error) {
-	deployment, err := config.K8s.GetDeployment(operator.K8sName(apiName))
-	if err != nil {
-		return false, err
-	}
-
-	return isAPIUpdating(deployment)
-}
-
 // returns true if min_replicas are not ready and no updated replicas have errored
 func isAPIUpdating(deployment *kapps.Deployment) (bool, error) {
 	pods, err := config.K8s.ListPodsByLabel("apiName", deployment.Labels["apiName"])
@@ -462,4 +423,18 @@ func isAPIUpdating(deployment *kapps.Deployment) (bool, error) {
 func isPodSpecLatest(deployment *kapps.Deployment, pod *kcore.Pod) bool {
 	return deployment.Spec.Template.Labels["predictorID"] == pod.Labels["predictorID"] &&
 		deployment.Spec.Template.Labels["deploymentID"] == pod.Labels["deploymentID"]
+}
+
+func getDashboardURL(apiName string) string {
+	loadBalancerURL, err := operator.LoadBalancerURL()
+	if err != nil {
+		return ""
+	}
+
+	dashboardURL := fmt.Sprintf(
+		"%s/dashboard/d/%s/realtimeapi?orgId=1&refresh=30s&var-api_name=%s",
+		loadBalancerURL, _realtimeDashboardUID, apiName,
+	)
+
+	return dashboardURL
 }

@@ -22,6 +22,7 @@ import (
 
 	"github.com/cortexlabs/cortex/pkg/lib/errors"
 	"github.com/cortexlabs/cortex/pkg/lib/parallel"
+	"github.com/cortexlabs/cortex/pkg/lib/pointer"
 	"github.com/cortexlabs/cortex/pkg/lib/sets/strset"
 	"github.com/cortexlabs/cortex/pkg/operator/config"
 	"github.com/cortexlabs/cortex/pkg/operator/lib/routines"
@@ -36,6 +37,8 @@ import (
 	kcore "k8s.io/api/core/v1"
 )
 
+const _batchDashboardUID = "batchapi"
+
 func UpdateAPI(apiConfig *userconfig.API, projectID string) (*spec.API, string, error) {
 	prevVirtualService, err := config.K8s.GetVirtualService(operator.K8sName(apiConfig.Name))
 	if err != nil {
@@ -45,7 +48,7 @@ func UpdateAPI(apiConfig *userconfig.API, projectID string) (*spec.API, string, 
 	api := spec.GetAPISpec(apiConfig, projectID, "", config.ClusterName()) // Deployment ID not needed for BatchAPI spec
 
 	if prevVirtualService == nil {
-		if err := config.AWS.UploadJSONToS3(api, config.Cluster.Bucket, api.Key); err != nil {
+		if err := config.AWS.UploadJSONToS3(api, config.CoreConfig.Bucket, api.Key); err != nil {
 			return nil, "", errors.Wrap(err, "upload api spec")
 		}
 
@@ -61,7 +64,7 @@ func UpdateAPI(apiConfig *userconfig.API, projectID string) (*spec.API, string, 
 	}
 
 	if prevVirtualService.Labels["specID"] != api.SpecID {
-		if err := config.AWS.UploadJSONToS3(api, config.Cluster.Bucket, api.Key); err != nil {
+		if err := config.AWS.UploadJSONToS3(api, config.CoreConfig.Bucket, api.Key); err != nil {
 			return nil, "", errors.Wrap(err, "upload api spec")
 		}
 
@@ -104,12 +107,12 @@ func deleteS3Resources(apiName string) error {
 	return parallel.RunFirstErr(
 		func() error {
 			prefix := filepath.Join(config.ClusterName(), "apis", apiName)
-			return config.AWS.DeleteS3Dir(config.Cluster.Bucket, prefix, true)
+			return config.AWS.DeleteS3Dir(config.CoreConfig.Bucket, prefix, true)
 		},
 		func() error {
 			prefix := spec.JobAPIPrefix(config.ClusterName(), userconfig.BatchAPIKind, apiName)
 			routines.RunWithPanicHandler(func() {
-				config.AWS.DeleteS3Dir(config.Cluster.Bucket, prefix, true) // deleting job files may take a while
+				config.AWS.DeleteS3Dir(config.CoreConfig.Bucket, prefix, true) // deleting job files may take a while
 			})
 			return nil
 		},
@@ -285,11 +288,28 @@ func GetAPIByName(deployedResource *operator.DeployedResource) ([]schema.APIResp
 		}
 	}
 
+	dashboardURL := pointer.String(getDashboardURL(api.Name))
+
 	return []schema.APIResponse{
 		{
 			Spec:             *api,
 			BatchJobStatuses: jobStatuses,
 			Endpoint:         endpoint,
+			DashboardURL:     dashboardURL,
 		},
 	}, nil
+}
+
+func getDashboardURL(apiName string) string {
+	loadBalancerURL, err := operator.LoadBalancerURL()
+	if err != nil {
+		return ""
+	}
+
+	dashboardURL := fmt.Sprintf(
+		"%s/dashboard/d/%s/batchapi?orgId=1&refresh=30s&var-api_name=%s",
+		loadBalancerURL, _batchDashboardUID, apiName,
+	)
+
+	return dashboardURL
 }

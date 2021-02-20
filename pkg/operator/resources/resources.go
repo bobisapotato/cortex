@@ -92,12 +92,12 @@ func Deploy(projectBytes []byte, configFileName string, configBytes []byte, forc
 
 	var apiConfigs []userconfig.API
 	if config.Provider == types.AWSProviderType {
-		apiConfigs, err = spec.ExtractAPIConfigs(configBytes, config.Provider, configFileName, &config.Cluster.Config, nil)
+		apiConfigs, err = spec.ExtractAPIConfigs(configBytes, config.Provider, configFileName)
 		if err != nil {
 			return nil, err
 		}
 	} else {
-		apiConfigs, err = spec.ExtractAPIConfigs(configBytes, config.Provider, configFileName, nil, &config.GCPCluster.GCPConfig)
+		apiConfigs, err = spec.ExtractAPIConfigs(configBytes, config.Provider, configFileName)
 		if err != nil {
 			return nil, err
 		}
@@ -165,7 +165,7 @@ func UpdateAPI(apiConfig *userconfig.API, projectID string, force bool) (*schema
 	case userconfig.TaskAPIKind:
 		api, msg, err = taskapi.UpdateAPI(apiConfig, projectID)
 	case userconfig.TrafficSplitterKind:
-		api, msg, err = trafficsplitter.UpdateAPI(apiConfig, force)
+		api, msg, err = trafficsplitter.UpdateAPI(apiConfig)
 	default:
 		return nil, "", ErrorOperationIsOnlySupportedForKind(
 			*deployedResource, userconfig.RealtimeAPIKind,
@@ -192,12 +192,12 @@ func Patch(configBytes []byte, configFileName string, force bool) ([]schema.Depl
 	var err error
 
 	if config.Provider == types.AWSProviderType {
-		apiConfigs, err = spec.ExtractAPIConfigs(configBytes, config.Provider, configFileName, &config.Cluster.Config, nil)
+		apiConfigs, err = spec.ExtractAPIConfigs(configBytes, config.Provider, configFileName)
 		if err != nil {
 			return nil, err
 		}
 	} else {
-		apiConfigs, err = spec.ExtractAPIConfigs(configBytes, config.Provider, configFileName, nil, &config.GCPCluster.GCPConfig)
+		apiConfigs, err = spec.ExtractAPIConfigs(configBytes, config.Provider, configFileName)
 		if err != nil {
 			return nil, err
 		}
@@ -275,7 +275,7 @@ func patchAPI(apiConfig *userconfig.API, force bool) (*spec.API, string, error) 
 	case userconfig.TaskAPIKind:
 		return taskapi.UpdateAPI(apiConfig, prevAPISpec.ProjectID)
 	default:
-		return trafficsplitter.UpdateAPI(apiConfig, force)
+		return trafficsplitter.UpdateAPI(apiConfig)
 	}
 }
 

@@ -86,6 +86,16 @@ func surgeOrUnavailableValidator(str string) (string, error) {
 	return str, nil
 }
 
+func checkForInvalidBucketProvider(modelPath string) (string, error) {
+	s3Path := strings.HasPrefix(modelPath, "s3://")
+	gcsPath := strings.HasPrefix(modelPath, "gs://")
+
+	if !s3Path && !gcsPath {
+		return "", ErrorInvalidModelPathProvider(modelPath)
+	}
+	return modelPath, nil
+}
+
 type errorForPredictorTypeFn func(string, []string) error
 
 func generateErrorForPredictorTypeFn(api *userconfig.API) errorForPredictorTypeFn {
@@ -143,7 +153,7 @@ func validateDirModels(
 			return nil, err
 		}
 
-		gcsObjects, err := gcpClient.ListGCSPathDir(modelPath, nil)
+		gcsObjects, err := gcpClient.ListGCSPathDir(modelPath, false, nil)
 		if err != nil {
 			return nil, err
 		}
@@ -277,7 +287,7 @@ func validateModels(
 			}
 			modelPrefix = s.EnsureSuffix(modelPrefix, "/")
 
-			gcsObjects, err := gcpClient.ListGCSPathDir(modelPath, nil)
+			gcsObjects, err := gcpClient.ListGCSPathDir(modelPath, false, nil)
 			if err != nil {
 				return nil, errors.Wrap(err, modelNameWrapStr)
 			}
